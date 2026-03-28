@@ -1,0 +1,54 @@
+# Compiled object files
+*.o
+*.obj
+
+# Compiled binary
+vel
+vel.exe
+
+# Build artifacts
+*.a
+*.so
+*.dll
+*.dylib
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Readline history (written at runtime to $HOME)
+.vel_history
+
+# Test output
+*.out
+*.log
+
+# CMake (if ever added)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Autotools (if ever added)
+Makefile.in
+configure
+autom4te.cache/
+config.log
+config.status
+
+# Coverage and profiling
+*.gcno
+*.gcda
+*.gcov
+gmon.out
+perf.data
+
+# Packaging
+*.tar.gz
+*.tar.bz2
+*.zip
+dist/
