@@ -39,6 +39,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 void register_sys_builtins(vel_t vel);
 void register_job_builtins(vel_t vel);
 void register_extra_builtins(vel_t vel);
+/* forward declaration from vel_newcmds.c */
+void register_new_builtins(vel_t vel);
 
 /* ============================================================
  * Reflection / meta
@@ -1000,14 +1002,41 @@ static VELCB vel_val_t cmd_substr(vel_t vel, size_t argc, vel_val_t *argv)
 
 static VELCB vel_val_t cmd_strpos(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    const char *hay, *needle, *found;
+    const char *hay, *needle, *found, *p;
     size_t      offset = 0;
+    int         last   = 0;
+    size_t      base   = 0;  /* index of first real arg after flags */
     (void)vel;
-    if (argc < 2) return vel_val_int(-1);
-    hay    = vel_str(argv[0]);
-    needle = vel_str(argv[1]);
-    if (argc > 2) {
-        offset = (size_t)atoll(vel_str(argv[2]));
+
+    /* check for -last flag */
+    if (argc >= 1 && !strcmp(vel_str(argv[0]), "-last")) {
+        last = 1;
+        base = 1;
+    }
+
+    if (argc < base + 2) return vel_val_int(-1);
+    hay    = vel_str(argv[base]);
+    needle = vel_str(argv[base + 1]);
+    if (!needle[0]) return vel_val_int(0);
+
+    if (last) {
+        /* scan from the right — find the last occurrence */
+        size_t   hlen  = strlen(hay);
+        size_t   nlen  = strlen(needle);
+        vel_int_t pos  = -1;
+        if (nlen <= hlen) {
+            p = hay;
+            while ((p = strstr(p, needle)) != NULL) {
+                pos = (vel_int_t)(p - hay);
+                p++;
+            }
+        }
+        return vel_val_int(pos);
+    }
+
+    /* forward search (original behaviour) */
+    if (argc > base + 2) {
+        offset = (size_t)atoll(vel_str(argv[base + 2]));
         if (offset >= strlen(hay)) return vel_val_int(-1);
     }
     found = strstr(hay + offset, needle);
@@ -1479,4 +1508,7 @@ void register_builtins(vel_t vel)
 
     /* extra shell commands (vel_extra.c) */
     register_extra_builtins(vel);
+
+    /* new built-ins: list utils, math helpers, string extras, clock */
+    register_new_builtins(vel);
 }

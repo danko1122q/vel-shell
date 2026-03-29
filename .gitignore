@@ -52,3 +52,5 @@ perf.data
 *.tar.bz2
 *.zip
 dist/
+
+laporan.lp

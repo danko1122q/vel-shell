@@ -10,7 +10,7 @@ ifeq ($(READLINE),1)
 endif
 
 SRCS = main.c vel_cmd.c vel_sys.c vel_jobs.c vel_run.c vel_lex.c \
-       vel_expr.c vel_mem.c vel_map.c vel_tmpl.c vel_extra.c
+       vel_expr.c vel_mem.c vel_map.c vel_tmpl.c vel_extra.c vel_newcmds.c
 OBJS = $(SRCS:.c=.o)
 TARGET = vel
 
