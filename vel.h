@@ -34,7 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * vel.h  --  Vel Interpreted Language, public API
  */
 
-#define VEL_VERSION "0.1.0"
+#define VEL_VERSION "0.2.0"
 
 /* ---------- integer type ---------- */
 #include <stdint.h>
