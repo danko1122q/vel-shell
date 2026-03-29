@@ -43,7 +43,7 @@ The following are features that exist in both vel and standard Tcl 8.6.
 - `for` (foreach-style over lists)
 - `foreach` (with index-value two-variable form)
 - `break`, `continue`, `return`
-- `switch` (value matching)
+- `switch` (value matching with single-block or flat syntax)
 
 ### Functions
 - `func` (equivalent to Tcl `proc`)
@@ -118,7 +118,7 @@ Vel has only flat string values. There is no built-in associative data structure
 
 Tcl has full POSIX and extended regular expression support via `regexp`, `regsub`, and pattern matching options on `string match`, `lsearch`, `switch`, etc.
 
-Vel's `grep` command performs substring matching only. There is no `regexp` or `regsub` equivalent. The `switch` command matches by exact equality; there is no glob or regex pattern mode.
+Vel's `grep` command performs substring matching only. There is no `regexp` or `regsub` equivalent. The `switch` command matches by exact string equality; there is no glob or regex pattern mode (unlike Tcl's `-glob` and `-regexp` options).
 
 **Impact**: text processing tasks that require pattern matching (log parsing, config parsing, validation) require either shelling out or manual character-by-character parsing.
 
@@ -312,6 +312,7 @@ Tcl requires expressions in braces for performance: `if {$x > 0}`. Vel evaluates
 | Basic syntax (commands, substitution, quoting) | Yes | Yes |
 | Arithmetic expressions | Yes | Yes |
 | String operations (basic) | Yes | Yes |
+| `switch` (value matching) | Yes — exact equality; single-block and flat syntax; `default` fallthrough | Yes — exact, `-glob`, and `-regexp` modes |
 | Regular expressions | No | Yes |
 | `string map` (multi-pair) | No | Yes |
 | `string is` type testing | No | Yes |

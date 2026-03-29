@@ -1289,15 +1289,67 @@ static VELCB vel_val_t cmd_dirname(vel_t vel, size_t argc, vel_val_t *argv)
     r=vel_val_str(tmp); free(tmp); return r;
 }
 
-/* ============================================================ switch / date / bg */
+/* ============================================================ switch / date / bg
+ *
+ * FIX: dua bug diperbaiki:
+ *   1. Body sekarang di-execute via vel_parse_val(), bukan di-clone sebagai string.
+ *      Sebelumnya `switch $x {a} { write hello }` hanya mengembalikan teks
+ *      "{ write hello }" tanpa menjalankannya.
+ *   2. Mendukung syntax satu-block (Tcl-style):
+ *        switch $val { pat1 {body1} pat2 {body2} default {bodyN} }
+ *      agar pattern berupa bare word (seperti "all") tidak dievaluasi
+ *      sebagai command sebelum mencapai cmd_switch.
+ *
+ * Syntax yang didukung:
+ *   switch VAL {pat1} {body1} {pat2} {body2} ...
+ *   switch VAL { pat1 {body1} pat2 {body2} }   <- satu block, Tcl-style
+ *
+ * Kata kunci "default" cocok dengan nilai apa pun (fallthrough).
+ */
 static VELCB vel_val_t cmd_switch(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    const char *val; size_t i; (void)vel;
-    if (argc<3) return NULL;
-    val=vel_str(argv[0]);
-    for(i=1;i+1<argc;i+=2) {
-        const char *pat=vel_str(argv[i]);
-        if(!strcmp(pat,"default")||!strcmp(pat,val)) return vel_val_clone(argv[i+1]);
+    const char *val;
+    size_t i;
+
+    if (argc < 2) return NULL;
+    val = vel_str(argv[0]);
+
+    /*
+     * Syntax satu-block: switch VAL { pat1 {body1} pat2 {body2} }
+     * Kenali jika argc == 2 dan argv[1] adalah block (diurai ulang sebagai
+     * flat list oleh vel_subst_list).
+     */
+    if (argc == 2) {
+        vel_list_t lst = vel_subst_list(vel, argv[1]);
+        vel_val_t  result = NULL;
+        size_t     n;
+
+        if (!lst || vel->err_code) return NULL;
+        n = vel_list_len(lst);
+
+        for (i = 0; i + 1 < n; i += 2) {
+            vel_val_t pat_v  = vel_list_get(lst, i);
+            vel_val_t body_v = vel_list_get(lst, i + 1);
+            const char *pat  = pat_v ? vel_str(pat_v) : "";
+
+            if (!strcmp(pat, "default") || !strcmp(pat, val)) {
+                result = vel_parse_val(vel, body_v, 0);
+                break;
+            }
+        }
+        vel_list_free(lst);
+        return result;
+    }
+
+    /*
+     * Syntax flat: switch VAL {pat1} {body1} {pat2} {body2} ...
+     * Pattern sudah berupa string literal (karena dikirim dalam {} oleh
+     * pemanggil); body di-execute langsung oleh vel_parse_val.
+     */
+    for (i = 1; i + 1 < argc; i += 2) {
+        const char *pat = vel_str(argv[i]);
+        if (!strcmp(pat, "default") || !strcmp(pat, val))
+            return vel_parse_val(vel, argv[i + 1], 0);
     }
     return NULL;
 }

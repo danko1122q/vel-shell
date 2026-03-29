@@ -1,6 +1,7 @@
-# Makefile for vel - Minimalist & Fast Version
+# Makefile for vel - Transparent Build Version
 CC      = gcc
-CFLAGS  = -Wall -Wextra -O2 -std=c99 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
+# Pindah ke C11 jika kamu mau coba fitur baru, atau tetap C99
+CFLAGS  = -Wall -Wextra -O2 -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
 LDFLAGS = -lm
 
 ifeq ($(READLINE),1)
@@ -19,29 +20,33 @@ BINDIR  = $(DESTDIR)$(PREFIX)/bin
 
 all: $(TARGET)
 
-# Compile binary
+# Menampilkan informasi build di awal
 $(TARGET): $(OBJS)
-	@echo "Linking $(TARGET)..."
-	@$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "--------------------------------------"
+	@echo "Linking $(TARGET) with $(LDFLAGS)..."
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Build complete: $(TARGET)"
+	@echo "--------------------------------------"
 
-# Compile objects
+# Compile objects (Hapus @ agar baris perintah terlihat)
 %.o: %.c vel.h vel_priv.h vel_jobs.h
-	@$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-# INSTALL: Cuma copy file ke /usr/local/bin (Sangat Cepat)
+# INSTALL
 install: $(TARGET)
 	@echo "Installing $(TARGET) to $(BINDIR)..."
-	@install -Dm755 $(TARGET) $(BINDIR)/vel
+	install -Dm755 $(TARGET) $(BINDIR)/vel
 	@echo "Success! You can now run 'vel' from terminal."
 
-# UNINSTALL: Cuma hapus file
+# UNINSTALL
 uninstall:
 	@echo "Removing $(TARGET) from $(BINDIR)..."
-	@rm -f $(BINDIR)/vel
+	rm -f $(BINDIR)/vel
 	@echo "Uninstalled."
 
 clean:
-	@rm -f $(OBJS) $(TARGET)
+	@echo "Cleaning objects and binary..."
+	rm -f $(OBJS) $(TARGET)
 	@echo "Cleaned up."
 
 .PHONY: all install uninstall clean

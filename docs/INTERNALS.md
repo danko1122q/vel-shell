@@ -402,6 +402,7 @@ The codebase contains explicit comments documenting resolved bugs. They are summ
 | FIX 2 | `vmap_get` / `vmap_has` use an explicit early return for clarity and to make O(1) intent unambiguous. |
 | FIX 4 | `run_system` (the `system` command) gained a `SIGALRM`-based timeout with a `sigprocmask` race-condition guard. |
 | FIX 5 | `count_depth` in the REPL now correctly skips brace/bracket characters inside block comments, preventing the REPL from hanging waiting for a closing brace that is inside a comment. |
+| FIX SWITCH | `cmd_switch` had two bugs: (1) the matched body was returned as a raw string via `vel_val_clone` instead of being executed — `switch $x {a} { write hello }` would return the literal text `{ write hello }` rather than running it; (2) bare-word patterns in flat syntax (e.g., `switch $x all { ... }`) were evaluated as commands by the interpreter before reaching `cmd_switch`, causing "unknown function" errors. Both are fixed: bodies are now executed with `vel_parse_val`, and a Tcl-style single-block syntax (`switch val { pat {body} ... }`) is added so patterns are always treated as literal strings. |
 
 ---
 
@@ -424,7 +425,7 @@ The codebase contains explicit comments documenting resolved bugs. They are summ
 
 ## Platform Notes
 
-- The code is written in C99 with POSIX.1-2008 extensions enabled via feature-test macros.
+- The code is written in C11 with POSIX.1-2008 extensions enabled via feature-test macros.
 - Job control, pipelines, signal handling, `glob`, `chmod`, `chown`, `ln`, and several other features are conditionally compiled out on `WIN32`.
 - MSVC compatibility is partially supported: `atoll` is mapped to `_atoi64`, some warnings are suppressed, and the integer-overflow fallback path in `vel_expr.c` is used instead of GCC/Clang builtins.
 - The `WATCOMC` preprocessor symbol disables the `run_system` timeout and related features for Watcom C compatibility.

@@ -215,16 +215,37 @@ Returns from the current function with an optional value.
 
 Sets the implicit return value of the current block without stopping execution. Useful for building up a return value across multiple statements.
 
-### `switch value {pattern body ...}`
+### `switch value { pattern body ... }` or `switch value {pat} {body} ...`
 
-Matches `value` against each `pattern` in order. Executes the corresponding `body` on first match. The pattern `default` matches anything.
+Matches `value` against each `pattern` in order. Executes the corresponding `body` on first match and returns its result. The keyword `default` matches any value and acts as a fallthrough clause.
+
+Two equivalent syntaxes are supported:
+
+**Single-block syntax (recommended)** — all pattern-body pairs are enclosed in one outer block. Patterns are bare words; they are not evaluated as commands.
 
 ```
 switch $color {
-    red   { write "stop" }
-    green { write "go" }
+    red     { write "stop"    }
+    green   { write "go"      }
+    yellow  { write "caution" }
     default { write "unknown" }
 }
+```
+
+**Flat syntax** — each pattern and each body is a separate argument. Patterns must be enclosed in `{}` to prevent them from being evaluated as commands before `switch` is reached.
+
+```
+switch $color {red} { write "stop" } {green} { write "go" } {default} { write "unknown" }
+```
+
+The body argument is always executed as vel code, not returned as a literal string. The return value of `switch` is the return value of the matched body, or empty if no pattern matches.
+
+```
+set label [switch $code {
+    0 { set "" "ok"      }
+    1 { set "" "warning" }
+    default { set "" "error" }
+}]
 ```
 
 ---
