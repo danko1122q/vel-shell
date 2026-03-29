@@ -28,28 +28,58 @@ This document describes the internal architecture of the vel interpreter for dev
 
 ## Source File Overview
 
+### Project Layout
+
+```
+vel/
+├── include/          # Public and internal header files
+│   ├── vel.h
+│   ├── vel_priv.h
+│   └── vel_jobs.h
+├── src/              # C implementation files
+│   ├── main.c
+│   ├── vel_run.c
+│   ├── vel_lex.c
+│   ├── vel_cmd.c
+│   ├── vel_sys.c
+│   ├── vel_extra.c
+│   ├── vel_jobs.c
+│   ├── vel_expr.c
+│   ├── vel_mem.c
+│   ├── vel_map.c
+│   ├── vel_tmpl.c
+│   └── vel_newcmds.c
+├── docs/             # Documentation
+├── Makefile
+├── LICENSE
+└── README.md
+```
+
+### File Descriptions
+
 | File | Responsibility |
 |------|----------------|
-| `vel.h` | Public API declarations and opaque types |
-| `vel_priv.h` | Internal struct definitions and declarations |
-| `main.c` | REPL, file runner, stdin runner, native commands (`system`, `readline`, `writechar`, `canread`) |
-| `vel_run.c` | Core execution loop (`vel_parse`), error API, callback API, public lifecycle API |
-| `vel_lex.c` | Lexer: whitespace skipping, token reading, heredoc, line tokenization |
-| `vel_cmd.c` | Built-in language commands (control flow, strings, lists, functions, I/O, eval) |
-| `vel_sys.c` | System and filesystem commands; `run`, `exec`, `pipe`, `redirect`, file operations |
-| `vel_extra.c` | Shell-utility commands: `ls`, `tree`, `cat`, `grep`, `wc`, `head`, `tail`, `stat`, etc. |
-| `vel_jobs.c` | POSIX job control: `spawn`, `wait`, `fg`, `jobs`, `sighandle`, pipeline management |
-| `vel_expr.c` | Arithmetic/logical expression evaluator |
-| `vel_mem.c` | Value, list, environment, variable, and function allocation/lifecycle |
-| `vel_map.c` | Hash map used for function and variable lookup |
-| `vel_tmpl.c` | Template engine: `<?vel ... ?>` processing |
-| `vel_newcmds.c` | Extended built-in commands: list utilities, math, string extras, clock, dict, base64, upvar, reflect extensions, `try...finally` |
+| `include/vel.h` | Public API declarations and opaque types |
+| `include/vel_priv.h` | Internal struct definitions and declarations |
+| `include/vel_jobs.h` | Job control types and declarations |
+| `src/main.c` | REPL, file runner, stdin runner, native commands (`system`, `readline`, `writechar`, `canread`) |
+| `src/vel_run.c` | Core execution loop (`vel_parse`), error API, callback API, public lifecycle API |
+| `src/vel_lex.c` | Lexer: whitespace skipping, token reading, heredoc, line tokenization |
+| `src/vel_cmd.c` | Built-in language commands (control flow, strings, lists, functions, I/O, eval) |
+| `src/vel_sys.c` | System and filesystem commands; `run`, `exec`, `pipe`, `redirect`, file operations |
+| `src/vel_extra.c` | Shell-utility commands: `ls`, `tree`, `cat`, `grep`, `wc`, `head`, `tail`, `stat`, etc. |
+| `src/vel_jobs.c` | POSIX job control: `spawn`, `wait`, `fg`, `jobs`, `sighandle`, pipeline management |
+| `src/vel_expr.c` | Arithmetic/logical expression evaluator |
+| `src/vel_mem.c` | Value, list, environment, variable, and function allocation/lifecycle |
+| `src/vel_map.c` | Hash map used for function and variable lookup |
+| `src/vel_tmpl.c` | Template engine: `<?vel ... ?>` processing |
+| `src/vel_newcmds.c` | Extended built-in commands: list utilities, math, string extras, clock, dict, base64, upvar, reflect extensions, `try...finally` |
 
 ---
 
 ## Build System
 
-The Makefile compiles all `.c` files to object files and links them together. Every object file depends on `vel.h`, `vel_priv.h`, and `vel_jobs.h` to ensure recompilation on any header change.
+The Makefile compiles all `.c` files in `src/` to object files and links them together. Every object file depends on the headers in `include/` (`vel.h`, `vel_priv.h`, and `vel_jobs.h`) to ensure recompilation on any header change. The `-I$(INCDIR)` flag (where `INCDIR = include`) is added to `CFLAGS` so all source files can use `#include "vel.h"` without relative path changes.
 
 Flags:
 - `-std=c99` — C99 is the language standard throughout.

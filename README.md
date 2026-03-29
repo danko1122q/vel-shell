@@ -91,6 +91,18 @@ for i {1 2 3} {
 }
 ```
 
+## Project Structure
+
+```
+vel/
+├── include/     # Header files (vel.h, vel_priv.h, vel_jobs.h)
+├── src/         # C source files
+├── docs/        # Documentation
+├── Makefile
+├── LICENSE
+└── README.md
+```
+
 ## Documentation
 
 Detailed documentation is provided in the `docs/` directory:

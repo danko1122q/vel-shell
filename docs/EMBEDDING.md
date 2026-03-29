@@ -34,11 +34,12 @@ Include `vel.h` in your source file:
 #include "vel.h"
 ```
 
-Link with the vel object files and libm:
+Link with the vel object files and libm. Source files are under `src/` and headers under `include/`:
 
 ```sh
-gcc myapp.c vel_run.c vel_cmd.c vel_sys.c vel_jobs.c vel_lex.c \
-    vel_expr.c vel_mem.c vel_map.c vel_tmpl.c vel_extra.c vel_newcmds.c -lm -o myapp
+gcc myapp.c src/vel_run.c src/vel_cmd.c src/vel_sys.c src/vel_jobs.c src/vel_lex.c \
+    src/vel_expr.c src/vel_mem.c src/vel_map.c src/vel_tmpl.c src/vel_extra.c src/vel_newcmds.c \
+    -Iinclude -lm -o myapp
 ```
 
 On Windows with DLL export, define `VELDLL` before including `vel.h`.

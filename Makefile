@@ -1,7 +1,9 @@
 # Makefile for vel - Transparent Build Version
 CC      = gcc
+SRCDIR  = src
+INCDIR  = include
 # Pindah ke C11 jika kamu mau coba fitur baru, atau tetap C99
-CFLAGS  = -Wall -Wextra -O2 -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
+CFLAGS  = -Wall -Wextra -O2 -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -I$(INCDIR)
 LDFLAGS = -lm
 
 ifeq ($(READLINE),1)
@@ -9,14 +11,17 @@ ifeq ($(READLINE),1)
   LDFLAGS += -lreadline
 endif
 
-SRCS = main.c vel_cmd.c vel_sys.c vel_jobs.c vel_run.c vel_lex.c \
-       vel_expr.c vel_mem.c vel_map.c vel_tmpl.c vel_extra.c vel_newcmds.c
+SRCS = $(SRCDIR)/main.c $(SRCDIR)/vel_cmd.c $(SRCDIR)/vel_sys.c $(SRCDIR)/vel_jobs.c \
+       $(SRCDIR)/vel_run.c $(SRCDIR)/vel_lex.c $(SRCDIR)/vel_expr.c $(SRCDIR)/vel_mem.c \
+       $(SRCDIR)/vel_map.c $(SRCDIR)/vel_tmpl.c $(SRCDIR)/vel_extra.c $(SRCDIR)/vel_newcmds.c
 OBJS = $(SRCS:.c=.o)
 TARGET = vel
 
 # Configuration
 PREFIX ?= /usr/local
 BINDIR  = $(DESTDIR)$(PREFIX)/bin
+
+HEADERS = $(INCDIR)/vel.h $(INCDIR)/vel_priv.h $(INCDIR)/vel_jobs.h
 
 all: $(TARGET)
 
@@ -29,7 +34,7 @@ $(TARGET): $(OBJS)
 	@echo "--------------------------------------"
 
 # Compile objects (Hapus @ agar baris perintah terlihat)
-%.o: %.c vel.h vel_priv.h vel_jobs.h
+$(SRCDIR)/%.o: $(SRCDIR)/%.c $(HEADERS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # INSTALL
