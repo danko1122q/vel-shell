@@ -18,7 +18,7 @@ Vel is a lightweight, embeddable scripting language interpreter written in C99. 
 
 ## Requirements
 
-- C99-compatible compiler (GCC or Clang recommended)
+- C11-compatible compiler (GCC or Clang recommended)
 - POSIX-compatible system (Linux, macOS, BSDs)
 - GNU Make
 - `libm` (standard on all Unix systems)
