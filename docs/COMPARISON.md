@@ -1,6 +1,6 @@
 # Vel vs Tcl: Comparison and Gap Analysis
 
-This document compares vel 0.1.0 against standard Tcl (specifically the Tcl 8.6 specification) and identifies features that vel has, features Tcl has that vel lacks, and features vel adds that Tcl does not have natively.
+This document compares vel 0.2.0 against standard Tcl (specifically the Tcl 8.6 specification) and identifies features that vel has, features Tcl has that vel lacks, and features vel adds that Tcl does not have natively.
 
 ---
 
