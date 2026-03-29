@@ -38,7 +38,7 @@ Link with the vel object files and libm:
 
 ```sh
 gcc myapp.c vel_run.c vel_cmd.c vel_sys.c vel_jobs.c vel_lex.c \
-    vel_expr.c vel_mem.c vel_map.c vel_tmpl.c vel_extra.c -lm -o myapp
+    vel_expr.c vel_mem.c vel_map.c vel_tmpl.c vel_extra.c vel_newcmds.c -lm -o myapp
 ```
 
 On Windows with DLL export, define `VELDLL` before including `vel.h`.

@@ -20,11 +20,12 @@ Version: 0.1.0
 12. [File System Commands](#file-system-commands)
 13. [Process and Job Commands](#process-and-job-commands)
 14. [Reflection and Metaprogramming](#reflection-and-metaprogramming)
-15. [Error Handling](#error-handling)
-16. [Comments](#comments)
-17. [Scoping Rules](#scoping-rules)
-18. [Special Variables](#special-variables)
-19. [Shebang Support](#shebang-support)
+15. [Extended Commands](#extended-commands)
+16. [Error Handling](#error-handling)
+17. [Comments](#comments)
+18. [Scoping Rules](#scoping-rules)
+19. [Special Variables](#special-variables)
+20. [Shebang Support](#shebang-support)
 
 ---
 
@@ -365,6 +366,42 @@ set s [join {a b c} ","]
 
 Iterates over list items. When `var` is a two-element list, the first element receives the index and the second receives the value.
 
+### `lreverse list`
+
+Returns the list with elements in reverse order.
+
+```
+set rev [lreverse {a b c}]   ;# c b a
+```
+
+### `lsort list`
+
+Returns the list sorted lexicographically (ascending).
+
+```
+set sorted [lsort {banana apple cherry}]   ;# apple banana cherry
+```
+
+### `luniq list`
+
+Returns the list with consecutive duplicate elements removed. For complete deduplication, sort the list first.
+
+```
+set u [luniq [lsort {a b a c b}]]   ;# a b c
+```
+
+### `lassign list var1 var2 ... [*rest]`
+
+Assigns elements of `list` to the named variables in order. Variables with no corresponding element are set to the empty string. If the last variable name starts with `*`, it collects all remaining elements as a sublist.
+
+```
+lassign {a b c d} x y *rest
+# x=a  y=b  rest={c d}
+
+lassign {p q} first second third
+# first=p  second=q  third=""
+```
+
 ---
 
 ## Expressions
@@ -403,6 +440,54 @@ Increments the variable `name` by `amount` (default: 1).
 ### `dec name [amount]`
 
 Decrements the variable `name` by `amount` (default: 1).
+
+### `abs n`
+
+Returns the absolute value of `n`. Returns an integer if `n` is an integer, float otherwise.
+
+```
+set v [abs -7]    ;# 7
+set v [abs -3.5]  ;# 3.5
+```
+
+### `max a b`
+
+Returns the larger of two values.
+
+### `min a b`
+
+Returns the smaller of two values.
+
+### `math subcommand [args]`
+
+Dispatcher for mathematical functions. All results are returned as integer when the result has no fractional part, float otherwise.
+
+| Subcommand | Args | Description |
+|------------|------|-------------|
+| `pi` | — | π (3.14159...) |
+| `e` | — | Euler's number (2.71828...) |
+| `sin` | x | Sine (radians) |
+| `cos` | x | Cosine (radians) |
+| `tan` | x | Tangent (radians) |
+| `asin` | x | Arcsine |
+| `acos` | x | Arccosine |
+| `atan` | x | Arctangent |
+| `atan2` | y x | Two-argument arctangent |
+| `sqrt` | x | Square root |
+| `pow` | base exp | Exponentiation |
+| `log` | x | Natural logarithm |
+| `log2` | x | Base-2 logarithm |
+| `log10` | x | Base-10 logarithm |
+| `abs` | x | Absolute value |
+| `floor` | x | Floor |
+| `ceil` | x | Ceiling |
+| `round` | x | Round to nearest integer |
+
+```
+set hyp [math sqrt [expr $a*$a + $b*$b]]
+set angle [math atan2 $dy $dx]
+set pi [math pi]
+```
 
 ---
 
@@ -495,6 +580,53 @@ Formats a string using printf-style format specifiers (`%s`, `%d`, `%f`, `%x`, e
 ### `printf fmt arg1 arg2 ...`
 
 Like `format` but writes the result to stdout.
+
+### `string repeat str n`
+
+Returns `str` concatenated `n` times. Returns empty if `n` is 0 or `str` is empty.
+
+```
+set line [string repeat "-" 40]
+```
+
+### `string reverse str`
+
+Returns the byte-reversed string. Not Unicode-aware.
+
+```
+set rev [string reverse "hello"]   ;# olleh
+```
+
+### `string is type str`
+
+Returns 1 if all characters of `str` match `type`, empty otherwise. An empty string always returns empty.
+
+| Type | Condition |
+|------|-----------|
+| `integer` | Parseable as a 64-bit integer |
+| `double` | Parseable as a floating-point number |
+| `alpha` | All alphabetic |
+| `alnum` | All alphanumeric |
+| `space` | All whitespace |
+| `upper` | All uppercase letters |
+| `lower` | All lowercase letters |
+| `print` | All printable characters |
+| `ascii` | All bytes < 128 |
+
+```
+if {[string is integer $input]} {
+    write "got a number"
+}
+```
+
+### `string map pairs str`
+
+Multi-pair substitution. `pairs` is a flat list `{old1 new1 old2 new2 ...}`. Scans `str` left-to-right; the first matching pair at each position wins. `pairs` must have an even number of elements.
+
+```
+set result [string map {hello hi world earth} "hello world"]
+# hi earth
+```
 
 ---
 
@@ -860,6 +992,22 @@ Returns the name of the currently executing function.
 
 Gets or sets the prefix used when expanding `$name` tokens. Default is `set `.
 
+### `reflect level`
+
+Returns the current call stack depth (number of active scripted function frames).
+
+```
+func inner {} {
+    write [reflect level]   ;# 2 if called from outer
+}
+func outer {} { inner }
+outer
+```
+
+### `reflect depth`
+
+Returns the current recursion depth (`vel->depth`), which counts all nested `vel_parse` calls including internal ones.
+
 ### `eval code`
 
 Evaluates `code` as vel script in the current scope.
@@ -892,19 +1040,179 @@ Registers `code` as the default handler for unknown command names.
 
 Returns a unique function name not currently in use, based on `hint`.
 
+### `upvar localname parentname`
+
+Creates a local alias for a variable in the parent (calling) scope. Reads the parent's current value into `localname` and installs a write-back watch so that subsequent assignments to `localname` propagate back to `parentname` in the caller.
+
+```
+func bump {} {
+    upvar n counter
+    inc n
+}
+
+set counter 0
+bump
+write $counter   ;# 1
+```
+
+The write-back targets `root_env` if `parentname` lives at global scope (using `set global`), or the immediate parent frame otherwise (using `upeval`).
+
+---
+
+## Extended Commands
+
+This section documents commands from `vel_newcmds.c` that do not fit neatly into the categories above.
+
+### `clock [unit]`
+
+Returns the current wall-clock time using `CLOCK_REALTIME`.
+
+| Unit | Return | Description |
+|------|--------|-------------|
+| `s` (default) | float | Seconds since the Unix epoch with nanosecond precision |
+| `ms` | integer | Milliseconds since the Unix epoch |
+| `us` | integer | Microseconds since the Unix epoch |
+| `ns` | integer | Nanoseconds since the Unix epoch |
+
+```
+set t0 [clock ms]
+# ... work ...
+set elapsed [expr [clock ms] - $t0]
+write "elapsed: ${elapsed}ms"
+```
+
+### `dict subcommand ...`
+
+Implements an associative array stored as a flat key-value list `{k1 v1 k2 v2 ...}`. This format is compatible with Tcl dicts and vel list operations.
+
+#### `dict set varname key value`
+
+Sets `key` to `value` in the dict stored in variable `varname`. Updates in place if the key exists; appends a new pair otherwise.
+
+```
+dict set d name Alice
+dict set d age 30
+```
+
+#### `dict get dict key`
+
+Returns the value for `key`, or empty if the key is not present.
+
+```
+set name [dict get $d name]
+```
+
+#### `dict exists dict key`
+
+Returns 1 if `key` is present in the dict, empty otherwise.
+
+```
+if {[dict exists $d email]} { write "has email" }
+```
+
+#### `dict unset varname key`
+
+Removes the key-value pair for `key` from the dict in `varname`. No-op if the key is absent.
+
+#### `dict keys dict`
+
+Returns a list of all keys in the dict.
+
+```
+for k [dict keys $d] { write $k }
+```
+
+#### `dict values dict`
+
+Returns a list of all values in the dict (in insertion order).
+
+#### `dict size dict`
+
+Returns the number of key-value pairs.
+
+```
+set n [dict size $d]
+```
+
+#### `dict for {kvar vvar} dict body`
+
+Iterates over the dict, binding each key and value to `kvar` and `vvar` and executing `body`. Supports `break` and `return`.
+
+```
+dict for {k v} $d {
+    write "$k = $v"
+}
+```
+
+**Example — building and querying a dict:**
+
+```
+dict set config host localhost
+dict set config port 8080
+dict set config debug 1
+
+write "connecting to [dict get $config host]:[dict get $config port]"
+
+if {[dict get $config debug]} {
+    write "debug mode enabled"
+}
+```
+
+### `base64 encode str`
+
+Encodes the byte string `str` to Base64 using the standard alphabet. No external library is required.
+
+```
+set encoded [base64 encode "hello world"]
+# aGVsbG8gd29ybGQ=
+```
+
+### `base64 decode str`
+
+Decodes a Base64 string. Returns an error if the input contains characters outside the Base64 alphabet. The result is a raw byte string.
+
+```
+set decoded [base64 decode "aGVsbG8gd29ybGQ="]
+# hello world
+```
+
 ---
 
 ## Error Handling
 
-### `try {body} [name {handler}]`
+### `try body [errvar catch_body] [finally fin_body]`
 
-Executes `body`. If an error occurs, optionally binds the error message to `name` and executes `handler`.
+Executes `body`. Supports optional catch and finally clauses. All clause combinations are valid:
+
+```
+try body
+try body errvar catch_body
+try body finally fin_body
+try body errvar catch_body finally fin_body
+```
+
+If an error occurs in `body` and `catch_body` is provided, the error message is bound to `errvar` and `catch_body` is executed.
+
+`fin_body` (the `finally` clause) **always** runs — even if `body` or `catch_body` used `return`, `break`, or raised an uncaught error. After `fin_body` completes, the original error state, stop signal, and return value are restored. Any side effects inside `fin_body` do not override the outer control flow.
 
 ```
 try {
     error "something went wrong"
 } msg {
     write "caught: $msg"
+} finally {
+    write "cleanup always runs"
+}
+```
+
+```
+func open_and_process {file} {
+    set f [fopen $file]
+    try {
+        process $f
+    } finally {
+        fclose $f   ;# runs even if process errors or returns early
+    }
 }
 ```
 
@@ -943,6 +1251,7 @@ Vel uses lexical scoping with dynamic variable lookup. Each function call create
 - `topeval` executes code at the global scope.
 - `upeval` executes code one scope level up.
 - `jaileval` executes code in a completely isolated scope.
+- `upvar` creates a local alias that mirrors a variable in the parent scope.
 
 ---
 

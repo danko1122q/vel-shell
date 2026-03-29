@@ -60,7 +60,11 @@ The following are features that exist in both vel and standard Tcl 8.6.
 - `split` (list from string)
 - `join` (string from list)
 - `format` (printf-style)
-- `repstr` (equivalent to Tcl `string map` for single substitution)
+- `repstr` (single-pair substitution)
+- `string map` (multi-pair substitution — `vel_newcmds.c`)
+- `string repeat` (`vel_newcmds.c`)
+- `string reverse` (`vel_newcmds.c`)
+- `string is` (type testing: `integer`, `double`, `alpha`, `alnum`, `space`, `upper`, `lower`, `print`, `ascii` — `vel_newcmds.c`)
 
 ### List Operations
 - `count` (equivalent to Tcl `llength`)
@@ -71,6 +75,10 @@ The following are features that exist in both vel and standard Tcl 8.6.
 - `lmap` (equivalent to Tcl `lmap`)
 - `list` (equivalent to Tcl `list`)
 - `indexof` (equivalent to Tcl `lsearch`)
+- `lreverse` (`vel_newcmds.c`)
+- `lsort` (`vel_newcmds.c`)
+- `luniq` (`vel_newcmds.c`)
+- `lassign` with splat (`*rest`) (`vel_newcmds.c`)
 
 ### I/O
 - `write`, `print`, `echo`
@@ -80,21 +88,34 @@ The following are features that exist in both vel and standard Tcl 8.6.
 ### Expressions
 - `expr` with full arithmetic, bitwise, comparison, and logical operators
 - `inc`, `dec` (shorthand increment/decrement)
+- `abs`, `max`, `min` (`vel_newcmds.c`)
+- `math` — `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sqrt`, `pow`, `log`, `log2`, `log10`, `floor`, `ceil`, `round`, `pi`, `e` (`vel_newcmds.c`)
+
+### Dictionaries
+- `dict set/get/exists/unset/keys/values/size/for` — flat key-value list format (`vel_newcmds.c`)
 
 ### Error Handling
-- `try` / `error` (equivalent to Tcl `catch` / `error`)
+- `try body [errvar handler] [finally fin]` — with optional `finally` clause (`vel_newcmds.c`)
+- `error`
 
 ### Introspection
 - `reflect` (covers Tcl `info` subset: version, funcs, vars, globals, has-func, has-var, args, body, this, name)
+- `reflect level` — current call stack depth (`vel_newcmds.c`)
+- `reflect depth` — current recursion depth (`vel_newcmds.c`)
 
 ### Variables
 - `set`, `local` (equivalent to Tcl `set` and `variable`)
 - `watch` (equivalent to Tcl `trace add variable`)
+- `upvar localname parentname` — local alias for a parent-scope variable (`vel_newcmds.c`)
 
 ### Evaluation
 - `eval`, `topeval`, `upeval`, `enveval`, `jaileval`
 - `subst`, `quote`
 - `catcher` (equivalent to Tcl `unknown`)
+
+### Encoding/Clock
+- `base64 encode/decode` — pure-C, no external library (`vel_newcmds.c`)
+- `clock [s|ms|us|ns]` — wall-clock time with nanosecond resolution (`vel_newcmds.c`)
 
 ---
 
@@ -106,14 +127,6 @@ Tcl has a full namespace system (`namespace eval`, `namespace export`, `namespac
 
 **Impact**: large projects with many functions will experience name collisions. Vel currently has no mitigation beyond naming conventions.
 
-### Arrays and Dictionaries
-
-Tcl has two-dimensional array variables (`array set`, `array get`, `$arr(key)`) and dictionaries (`dict create`, `dict get`, `dict set`, `dict for`, etc.).
-
-Vel has only flat string values. There is no built-in associative data structure. Structured data must be encoded as lists or passed as separate variables.
-
-**Impact**: writing data-processing scripts that require key-value lookup requires manual encoding (e.g., parallel lists or a naming convention like `set data_key value`).
-
 ### Regular Expressions
 
 Tcl has full POSIX and extended regular expression support via `regexp`, `regsub`, and pattern matching options on `string match`, `lsearch`, `switch`, etc.
@@ -122,26 +135,13 @@ Vel's `grep` command performs substring matching only. There is no `regexp` or `
 
 **Impact**: text processing tasks that require pattern matching (log parsing, config parsing, validation) require either shelling out or manual character-by-character parsing.
 
-### `string` Subcommand Suite
+### `string match` (glob patterns)
 
-Tcl's `string` command has many subcommands that vel does not implement:
-
-| Tcl command | Status in vel |
-|-------------|---------------|
-| `string match` (glob patterns) | Not present |
-| `string map` (multi-pair substitution) | Not present (`repstr` handles only one pair) |
-| `string repeat` | Not present |
-| `string reverse` | Not present |
-| `string is` (type testing: integer, double, alpha, etc.) | Not present |
-| `string cat` | Equivalent: use `concat` |
-| `string index` | Equivalent: `charat` |
-| `string range` | Equivalent: `substr` |
-| `string first` / `string last` | Equivalent: `strpos` (first only) |
-| `string bytelength` | Equivalent: `length` |
+Tcl's `string match` performs glob-style pattern matching. Vel has no equivalent; `switch` matches only by exact equality.
 
 ### `info` Subcommand Suite
 
-Tcl's `info` command covers many cases vel does not:
+Tcl's `info` command covers several cases vel does not:
 
 | Tcl command | Status in vel |
 |-------------|---------------|
@@ -152,7 +152,7 @@ Tcl's `info` command covers many cases vel does not:
 | `info args` | Equivalent: `reflect args` |
 | `info body` | Equivalent: `reflect body` |
 | `info exists` | Equivalent: `reflect has-var` |
-| `info level` | Not present (current call depth) |
+| `info level` | `reflect level` (call stack depth) |
 | `info frame` | Not present (detailed frame inspection) |
 | `info hostname` | Present separately as `hostname` command |
 | `info script` | Not present (current script filename) |
@@ -187,23 +187,18 @@ Vel has:
 
 Tcl has an event loop (`vwait`, `after`, `after cancel`, `fileevent`) for asynchronous programming. Vel has no event loop. Concurrency is limited to background jobs (`spawn`/`bg`) with blocking `wait`.
 
-### `uplevel` and `upvar`
+### `uplevel N`
 
 Tcl's `uplevel` evaluates code in a caller's scope by numeric level. Vel's `upeval` evaluates in the immediate parent scope only; there is no numeric level argument.
 
-Tcl's `upvar` creates a local alias to a variable in another scope. Vel has no equivalent.
+### `dict merge`, `dict with`, `dict filter`, `dict update`
 
-### Multiple Return Values via `lassign`
+Vel's `dict` subcommand covers the most common operations (`set`, `get`, `exists`, `unset`, `keys`, `values`, `size`, `for`). The following Tcl dict subcommands are not present:
 
-Tcl has `lassign list var1 var2 ...` to unpack a list into multiple variables in a single operation. Vel requires using `index` repeatedly.
-
-### `dict` Commands
-
-Tcl's `dict` command family is a complete key-value store built on an ordered dictionary type:
-
-`dict create`, `dict get`, `dict set`, `dict unset`, `dict exists`, `dict keys`, `dict values`, `dict for`, `dict merge`, `dict size`, `dict with`, `dict filter`, `dict update`.
-
-Vel has no equivalent. Associative data must be simulated with lists or parallel variables.
+- `dict merge` — merge multiple dicts into one.
+- `dict with` — execute a body with dict keys expanded as local variables.
+- `dict filter` — filter entries by key, value, or script predicate.
+- `dict update` — update multiple keys atomically.
 
 ### `apply` (Lambda Application)
 
@@ -225,17 +220,17 @@ Tcl 8.6 has `tailcall` for tail-call optimization. Vel does not. Deep tail-recur
 
 Tcl has comprehensive Unicode and encoding support (`encoding names`, `encoding convertto`, `encoding convertfrom`, `string length` counts characters not bytes). Vel's string operations are byte-oriented and have no explicit encoding support.
 
-### `clock` Commands
+### `clock format` / `clock scan` / `clock add`
 
-Tcl has an extensive `clock` subsystem: `clock seconds`, `clock milliseconds`, `clock microseconds`, `clock format`, `clock scan`, `clock add`. Vel has a `date` command (wraps `strftime`) and `sleep`, but no millisecond-resolution timestamps, no date parsing, and no date arithmetic.
+Tcl's `clock` subsystem provides date formatting (`clock format`), date parsing (`clock scan`), and date arithmetic (`clock add`). Vel's `clock` command returns raw timestamps (seconds, milliseconds, microseconds, nanoseconds) and its `date` command wraps `strftime` for formatting only. Date parsing and arithmetic are not available.
 
 ### `binary` Commands
 
 Tcl has `binary format` and `binary scan` for packing and unpacking binary data. Vel has no equivalent.
 
-### `trace` Command
+### `trace` Command (read and unset)
 
-Tcl's `trace` command allows monitoring variable reads, writes, and unsets, and command execution, at the language level. Vel has `watch` which covers variable write traces on assignment only.
+Tcl's `trace` command allows monitoring variable reads, writes, and unsets, and command execution, at the language level. Vel's `watch` covers variable write traces on assignment only; read traces and unset traces are not supported.
 
 ---
 
@@ -249,7 +244,7 @@ Standard Tcl provides equivalent functionality through the `file` command family
 
 ### POSIX Job Control
 
-Vel has `spawn`/`bg`, `wait`, `waitall`, `fg`, `jobs`, `killjob`, `jobstatus`, `bglist`, `bgpid`, `sighandle`, and `shpipe` for shell-style job control. Standard Tcl's `exec` is synchronous; background execution requires the `&` suffix and lacks Vel's job table.
+Vel has `spawn`/`bg`, `wait`, `waitall`, `fg`, `jobs`, `killjob`, `jobstatus`, `bglist`, `bgpid`, `sighandle`, and `shpipe` for shell-style job control. Standard Tcl's `exec` is synchronous; background execution requires the `&` suffix and lacks vel's job table.
 
 ### Auto-Execution of External Programs
 
@@ -267,6 +262,18 @@ Vel detects and reports `int64_t` overflow in `+`, `-`, and `*` operations in th
 
 Vel provides direct control over file descriptor redirection for external processes through first-class language commands. Tcl uses `exec` with redirection syntax embedded in the argument list (e.g., `exec cmd < infile > outfile`).
 
+### High-Resolution Clock
+
+Vel's `clock [ms|us|ns]` returns integer timestamps at millisecond, microsecond, or nanosecond resolution using `clock_gettime(CLOCK_REALTIME)`. Tcl's `clock milliseconds` and `clock microseconds` cover milliseconds and microseconds but not nanoseconds.
+
+### Base64
+
+Vel has `base64 encode` and `base64 decode` as first-class language commands with no external library dependency. Tcl provides Base64 only through the `base64` package (not a built-in).
+
+### `try...finally`
+
+Vel's `try` supports a `finally` clause that is guaranteed to run regardless of errors, `return`, or `break` in the body. Tcl's `catch` does not have a native `finally` equivalent (it requires manual `finally` simulation with additional `catch` nesting).
+
 ---
 
 ## Syntax Differences
@@ -276,12 +283,13 @@ Vel provides direct control over file descriptor redirection for external proces
 | Function definition | `proc name {params} {body}` | `func name {params} {body}` |
 | Variable assignment | `set name value` | `set name value` (same) |
 | List foreach | `foreach var list {body}` | `for var list {body}` or `foreach var list {body}` |
-| Error handling | `catch {body} var` | `try {body} var {handler}` |
+| Error handling | `catch {body} var` | `try {body} var {handler} [finally {fin}]` |
 | Introspection | `info ...` | `reflect ...` |
 | Increment | `incr var` | `inc var` |
 | Decrement | no built-in | `dec var` |
 | Block comment | no built-in | `## text ##` |
 | Integer division | `expr {$a / $b}` (int if both int) | `expr $a \ $b` |
+| List unpack | `lassign list v1 v2` | `lassign list v1 v2 *rest` (splat supported) |
 
 ---
 
@@ -303,6 +311,10 @@ Tcl's `puts` always appends a newline. Vel's `write` does not; `print` and `echo
 
 Tcl requires expressions in braces for performance: `if {$x > 0}`. Vel evaluates the condition through the same substitution pipeline as any other argument; braces are used only for quoting, not for optimization.
 
+### `dict` storage format
+
+Tcl's `dict` type is a native ordered dictionary with O(1) lookup. Vel's `dict` is implemented as a flat list `{k1 v1 k2 v2 ...}` with O(n) linear search. The on-disk/serialization format is identical, but performance differs for large dicts.
+
 ---
 
 ## Summary Table
@@ -314,11 +326,14 @@ Tcl requires expressions in braces for performance: `if {$x > 0}`. Vel evaluates
 | String operations (basic) | Yes | Yes |
 | `switch` (value matching) | Yes — exact equality; single-block and flat syntax; `default` fallthrough | Yes — exact, `-glob`, and `-regexp` modes |
 | Regular expressions | No | Yes |
-| `string map` (multi-pair) | No | Yes |
-| `string is` type testing | No | Yes |
-| List operations | Partial | Full |
-| `lassign` | No | Yes |
-| Dictionaries | No | Yes |
+| `string map` (multi-pair) | Yes (`vel_newcmds.c`) | Yes |
+| `string is` type testing | Yes (`vel_newcmds.c`) | Yes |
+| `string repeat` / `string reverse` | Yes (`vel_newcmds.c`) | Yes |
+| List operations | Yes | Yes |
+| `lassign` (with splat) | Yes (`vel_newcmds.c`) | Yes (no splat) |
+| `lsort` / `lreverse` / `luniq` | Yes (`vel_newcmds.c`) | Partial (`lsort` only natively) |
+| Dictionaries (basic ops) | Yes — flat list format, O(n) (`vel_newcmds.c`) | Yes — native type, O(1) |
+| `dict merge/with/filter/update` | No | Yes |
 | Namespaces | No | Yes |
 | File I/O (channels) | Partial (read-only, text) | Full |
 | Sockets | No | Yes |
@@ -329,8 +344,14 @@ Tcl requires expressions in braces for performance: `if {$x > 0}`. Vel evaluates
 | Unicode/encoding | No | Yes |
 | Binary data | No | Yes |
 | Package system | No | Yes |
-| `uplevel N` / `upvar` | Partial (`upeval` only) | Full |
+| `uplevel N` | Partial (`upeval` — immediate parent only) | Full |
+| `upvar` | Yes (`vel_newcmds.c`) | Yes |
 | `apply` (nameless lambda) | Partial (registers a name) | Yes |
+| `try...finally` | Yes (`vel_newcmds.c`) | No (requires manual simulation) |
+| Math functions (`sin`, `cos`, `sqrt`, etc.) | Yes (`vel_newcmds.c`) | Via `expr` only |
+| `reflect level` / `reflect depth` | Yes (`vel_newcmds.c`) | Partial (`info level`) |
+| Base64 | Yes, built-in (`vel_newcmds.c`) | Via package only |
+| High-resolution clock (ns) | Yes (`vel_newcmds.c`) | Up to µs |
 | Job control (POSIX) | Yes | No (basic exec only) |
 | Auto-exec from PATH | Yes | No |
 | Shell utility commands | Yes (ls, grep, find, etc.) | No |

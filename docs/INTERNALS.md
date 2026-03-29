@@ -19,9 +19,10 @@ This document describes the internal architecture of the vel interpreter for dev
 11. [Call Stack and Error Reporting](#call-stack-and-error-reporting)
 12. [Job Control Subsystem](#job-control-subsystem)
 13. [Template Engine](#template-engine)
-14. [Notable Bug Fixes](#notable-bug-fixes)
-15. [Compile-Time Configuration](#compile-time-configuration)
-16. [Platform Notes](#platform-notes)
+14. [Extended Built-in Commands](#extended-built-in-commands)
+15. [Notable Bug Fixes](#notable-bug-fixes)
+16. [Compile-Time Configuration](#compile-time-configuration)
+17. [Platform Notes](#platform-notes)
 
 ---
 
@@ -42,6 +43,7 @@ This document describes the internal architecture of the vel interpreter for dev
 | `vel_mem.c` | Value, list, environment, variable, and function allocation/lifecycle |
 | `vel_map.c` | Hash map used for function and variable lookup |
 | `vel_tmpl.c` | Template engine: `<?vel ... ?>` processing |
+| `vel_newcmds.c` | Extended built-in commands: list utilities, math, string extras, clock, dict, base64, upvar, reflect extensions, `try...finally` |
 
 ---
 
@@ -52,7 +54,7 @@ The Makefile compiles all `.c` files to object files and links them together. Ev
 Flags:
 - `-std=c99` — C99 is the language standard throughout.
 - `-D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L` — enables POSIX.1-2008 APIs (`strtok_r`, `sigaction`, `pread`, etc.) on glibc.
-- `-lm` — links `libm` for `fmod` in the expression evaluator.
+- `-lm` — links `libm` for `fmod` in the expression evaluator and math subcommands.
 
 Optional:
 - `READLINE=1` defines `VEL_USE_READLINE` and links `-lreadline` for the REPL.
@@ -387,6 +389,161 @@ Nested template calls are safe because the engine saves and restores `tmpl_buf`,
 
 ---
 
+## Extended Built-in Commands
+
+`vel_newcmds.c` registers a second batch of built-in commands via `register_new_builtins(vel_t vel)`, which must be called from the interpreter initialization sequence (e.g., in `vel_new` or `main`). These commands extend or override commands registered by `vel_cmd.c`.
+
+### List utilities
+
+| Command | Signature | Description |
+|---------|-----------|-------------|
+| `lreverse` | `lreverse list` | Returns the list with elements in reverse order. |
+| `lsort` | `lsort list` | Returns the list sorted lexicographically (ascending). Uses `qsort` with `strcmp`. |
+| `luniq` | `luniq list` | Returns the list with consecutive duplicate elements removed. Requires a pre-sorted list for full deduplication. |
+| `lassign` | `lassign list var1 var2 ... [*rest]` | Assigns list elements to named variables. The last variable may be prefixed with `*` to collect all remaining elements as a sublist (splat). Variables with no corresponding list element are set to the empty string. |
+
+### Math helpers
+
+| Command | Signature | Description |
+|---------|-----------|-------------|
+| `abs` | `abs n` | Absolute value. Returns integer if `n` is an integer, float otherwise. |
+| `max` | `max a b` | Returns the larger of two values. |
+| `min` | `min a b` | Returns the smaller of two values. |
+| `math` | `math subcommand [args]` | Dispatcher for mathematical functions (see below). |
+
+**`math` subcommands:**
+
+| Subcommand | Args | Description |
+|------------|------|-------------|
+| `pi` | — | Returns π as a float. |
+| `e` | — | Returns Euler's number as a float. |
+| `sin cos tan` | `x` | Trigonometric functions (radians). |
+| `asin acos atan` | `x` | Inverse trigonometric functions. |
+| `atan2` | `y x` | Two-argument arctangent. |
+| `sqrt` | `x` | Square root. |
+| `pow` | `base exp` | Exponentiation. |
+| `log` | `x` | Natural logarithm. |
+| `log2` | `x` | Base-2 logarithm. |
+| `log10` | `x` | Base-10 logarithm. |
+| `abs` | `x` | Absolute value (float path). |
+| `floor ceil round` | `x` | Rounding functions. |
+
+All `math` results are returned as integer if the result has no fractional part, float otherwise (via `smart_num`).
+
+### String extras
+
+`cmd_string` overrides (or supplements) any existing `string` command registered by `vel_cmd.c`.
+
+| Subcommand | Signature | Description |
+|------------|-----------|-------------|
+| `repeat` | `string repeat str n` | Returns `str` concatenated `n` times. Returns empty if `n` is 0 or `str` is empty. |
+| `reverse` | `string reverse str` | Returns the byte-reversed string. (Note: not Unicode-aware.) |
+| `is` | `string is type str` | Type test. Returns 1 if all characters of `str` match `type`, empty otherwise. Types: `integer`, `double`, `alpha`, `alnum`, `space`, `upper`, `lower`, `print`, `ascii`. |
+| `map` | `string map pairs str` | Multi-pair substitution. `pairs` is a flat list `{old1 new1 old2 new2 ...}`. Scans `str` left-to-right; first matching pair wins. Error if `pairs` has an odd count. |
+
+### Clock
+
+`clock [unit]` returns the current wall-clock time using `clock_gettime(CLOCK_REALTIME)`.
+
+| Unit | Return type | Value |
+|------|-------------|-------|
+| `s` (default) | float | Seconds since the Unix epoch, with nanosecond precision in the fractional part. |
+| `ms` | integer | Milliseconds since the Unix epoch. |
+| `us` | integer | Microseconds since the Unix epoch. |
+| `ns` | integer | Nanoseconds since the Unix epoch. |
+
+### Dict (flat key-value list)
+
+`dict` implements an associative array stored as a flat list `{k1 v1 k2 v2 ...}`. This is the same format as Tcl dicts. All subcommands that modify a dict take a variable name and update the variable in place.
+
+| Subcommand | Signature | Description |
+|------------|-----------|-------------|
+| `set` | `dict set varname key value` | Sets `key` to `value` in the dict stored in `varname`. Updates in place if the key already exists; appends a new pair otherwise. |
+| `get` | `dict get dict key` | Returns the value for `key`, or empty if not found. |
+| `exists` | `dict exists dict key` | Returns 1 if `key` is present, empty otherwise. |
+| `unset` | `dict unset varname key` | Removes the `key`/value pair from the dict in `varname`. No-op if the key is absent. |
+| `keys` | `dict keys dict` | Returns a list of all keys. |
+| `values` | `dict values dict` | Returns a list of all values (in insertion order). |
+| `size` | `dict size dict` | Returns the number of key-value pairs. |
+| `for` | `dict for {kvar vvar} dict body` | Iterates over the dict, binding each key and value to `kvar` and `vvar` respectively, and executing `body`. Supports `break` and `return`. |
+
+**Internal lookup:** `dict_find` does a linear scan of the flat list. This is O(n) in the number of entries, which is acceptable for small to medium dicts (< ~100 entries). For performance-critical large associative arrays, a `vel_map_t` structure would be more appropriate.
+
+### Base64
+
+Pure-C implementation with no external library dependency. Uses the standard alphabet (`A-Z a-z 0-9 + /`) with `=` padding.
+
+| Subcommand | Signature | Description |
+|------------|-----------|-------------|
+| `encode` | `base64 encode str` | Encodes the byte string `str` to Base64. |
+| `decode` | `base64 decode str` | Decodes a Base64 string. Returns an error if the input contains invalid characters. |
+
+Note: `base64 decode` treats the input as a raw binary string. The result is a byte string that may contain NUL bytes. Since vel values are NUL-terminated C strings, embedded NULs will truncate the result when passed to C string functions.
+
+### upvar
+
+`upvar localname parentname` creates a local variable `localname` that mirrors the variable `parentname` in the parent (calling) scope.
+
+**Mechanism:** `upvar` reads the current value of `parentname` from the parent environment and creates a local variable `localname` initialized to that value. It then installs a `watch` callback on `localname` that writes the new value back to `parentname` whenever `localname` is assigned.
+
+The write-back strategy depends on where `parentname` lives:
+- If `parentname` is in `root_env`: the watch runs `set global parentname $localname`.
+- Otherwise: the watch runs `upeval { set parentname $localname }`.
+
+```vel
+func bump {} {
+    upvar n counter   ;# n mirrors caller's counter
+    inc n             ;# writes back to counter in caller scope
+}
+
+set counter 0
+bump
+write $counter   ;# outputs 1
+```
+
+**Limitation:** The write-back is triggered by the `watch` mechanism, which fires on each assignment to `localname`. Only the immediate parent frame is supported by the `upeval` path; deeper nesting may not behave as expected.
+
+### Reflect extensions
+
+`vel_newcmds.c` extends the existing `reflect` command by registering the original implementation under the alias `__reflect_orig` and installing a wrapper `cmd_reflect_ext` as the new `reflect`.
+
+Two new subcommands are added:
+
+| Subcommand | Description |
+|------------|-------------|
+| `reflect level` | Returns the current call stack depth (`vel->stack_depth`) as an integer. |
+| `reflect depth` | Returns the current recursion depth (`vel->depth`) as an integer. |
+
+All other `reflect` subcommands are forwarded transparently to `__reflect_orig`.
+
+### try...finally
+
+`vel_newcmds.c` replaces the simpler `try` from `vel_cmd.c` with a full `try...finally` implementation.
+
+**Syntax (all forms):**
+
+```vel
+try body
+try body errvar catch_body
+try body finally fin_body
+try body errvar catch_body finally fin_body
+```
+
+**Semantics:**
+
+- `body` is executed.
+- If an error occurs and `catch_body` is provided, the error message is bound to `errvar` and `catch_body` is executed.
+- `fin_body` (if present) **always** runs, even if `body` or `catch_body` used `return`, `break`, or raised an uncaught error.
+- After `fin_body`, the original error state, stop signal, and return value are restored. `fin_body`'s own side effects do not override the state from `body`/`catch_body`.
+
+**Implementation notes:**
+
+- The `stop` and `retval` fields of `vel->env` are saved before executing `body` and restored carefully after `fin_body`.
+- `fin_body` runs with `stop = 0`, `retval_set = 0`, and `err_code = 0` so that any `return`/`break` inside `fin_body` is isolated.
+- If both `body` and `fin_body` produce errors, the error from `body` takes precedence.
+
+---
+
 ## Notable Bug Fixes
 
 The codebase contains explicit comments documenting resolved bugs. They are summarized here for reference.
@@ -402,7 +559,7 @@ The codebase contains explicit comments documenting resolved bugs. They are summ
 | FIX 2 | `vmap_get` / `vmap_has` use an explicit early return for clarity and to make O(1) intent unambiguous. |
 | FIX 4 | `run_system` (the `system` command) gained a `SIGALRM`-based timeout with a `sigprocmask` race-condition guard. |
 | FIX 5 | `count_depth` in the REPL now correctly skips brace/bracket characters inside block comments, preventing the REPL from hanging waiting for a closing brace that is inside a comment. |
-| FIX SWITCH | `cmd_switch` had two bugs: (1) the matched body was returned as a raw string via `vel_val_clone` instead of being executed — `switch $x {a} { write hello }` would return the literal text `{ write hello }` rather than running it; (2) bare-word patterns in flat syntax (e.g., `switch $x all { ... }`) were evaluated as commands by the interpreter before reaching `cmd_switch`, causing "unknown function" errors. Both are fixed: bodies are now executed with `vel_parse_val`, and a Tcl-style single-block syntax (`switch val { pat {body} ... }`) is added so patterns are always treated as literal strings. |
+| FIX SWITCH | `cmd_switch` had two bugs: (1) the matched body was returned as a raw string via `vel_val_clone` instead of being executed; (2) bare-word patterns in flat syntax were evaluated as commands before reaching `cmd_switch`. Both are fixed: bodies are now executed with `vel_parse_val`, and a Tcl-style single-block syntax is added so patterns are always treated as literal strings. |
 
 ---
 
@@ -425,7 +582,8 @@ The codebase contains explicit comments documenting resolved bugs. They are summ
 
 ## Platform Notes
 
-- The code is written in C11 with POSIX.1-2008 extensions enabled via feature-test macros.
+- The code is written in C99 with POSIX.1-2008 extensions enabled via feature-test macros.
 - Job control, pipelines, signal handling, `glob`, `chmod`, `chown`, `ln`, and several other features are conditionally compiled out on `WIN32`.
 - MSVC compatibility is partially supported: `atoll` is mapped to `_atoi64`, some warnings are suppressed, and the integer-overflow fallback path in `vel_expr.c` is used instead of GCC/Clang builtins.
 - The `WATCOMC` preprocessor symbol disables the `run_system` timeout and related features for Watcom C compatibility.
+- `vel_newcmds.c` uses `clock_gettime(CLOCK_REALTIME)` for the `clock` command; this is POSIX.1-2008 and not available on Windows without a compatibility layer.
