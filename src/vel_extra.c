@@ -802,12 +802,21 @@ static VELCB vel_val_t cmd_grep(vel_t vel, size_t argc, vel_val_t *argv)
 
     free(pat_work);
 
-    /* ----------------------------------------------------------------
-     * BUG #2 FIX: return nilai (bukan NULL) agar [grep ...] bisa
-     * di-capture ke variabel.  Kode lama: vel_val_free(out); return NULL
-     * → $r selalu string kosong.
-     * ---------------------------------------------------------------- */
-    if (vel_str(out)[0]) vel_write(vel, vel_str(out));
+    /* Output: return out tanpa vel_write supaya:
+     *   1. REPL interaktif  → REPL auto-print return value non-NULL (main.c)
+     *   2. Capture [grep …] → nilai tersedia, $r tidak kosong lagi
+     * Strip satu trailing newline agar REPL tidak mencetak baris kosong
+     * ekstra (REPL sudah menambah \n sendiri lewat printf). */
+    {
+        const char *s = vel_str(out);
+        size_t slen = strlen(s);
+        if (slen > 0 && s[slen - 1] == '\n') {
+            vel_val_t trimmed = vel_val_str("");
+            vel_val_cat_str_len(trimmed, s, slen - 1);
+            vel_val_free(out);
+            return trimmed;
+        }
+    }
     return out;
 }
 

@@ -500,6 +500,32 @@ static char *read_line_rl(const char *prompt)
     if (!fgets(buf, sizeof(buf), stdin)) return NULL;
     size_t len = strlen(buf);
     while (len && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = 0;
+
+    /* Strip bracketed paste escape sequences: ESC[200~ (start) dan ESC[201~ (end).
+     * Terminal mengirim ini saat paste jika mode belum dinonaktifkan.
+     * Format: \033[200~ di awal dan \033[201~ di akhir — hapus keduanya. */
+    {
+        char *p; char tmp[65536];
+        /* hapus semua kemunculan \033[200~ dan \033[201~ */
+        const char *seq[] = { "\033[200~", "\033[201~", NULL };
+        int changed = 1;
+        while (changed) {
+            changed = 0;
+            for (int si = 0; seq[si]; si++) {
+                size_t slen = strlen(seq[si]);
+                if ((p = strstr(buf, seq[si])) != NULL) {
+                    size_t pre = (size_t)(p - buf);
+                    size_t rest = strlen(p + slen);
+                    memcpy(tmp, buf, pre);
+                    memcpy(tmp + pre, p + slen, rest + 1);
+                    memcpy(buf, tmp, pre + rest + 1);
+                    len = pre + rest;
+                    changed = 1;
+                }
+            }
+        }
+    }
+
     return buf[0] ? strdup(buf) : strdup("");
 #endif
 }
@@ -518,6 +544,10 @@ static int repl(void)
 
 #ifndef WIN32
     g_color = isatty(fileno(stdout));
+    /* Nonaktifkan bracketed paste mode agar karakter ESC[200~ / ESC[201~
+     * tidak muncul di input saat pengguna paste teks ke REPL.
+     * ESC[?2004l  = disable bracketed paste (xterm, VTE, iTerm2, dst.) */
+    if (g_color) fputs("\033[?2004l", stdout);
 #endif
 
 #if HAS_READLINE
