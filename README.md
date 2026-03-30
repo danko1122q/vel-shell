@@ -1,17 +1,17 @@
 # vel
 
-Vel is a lightweight, embeddable scripting language interpreter written in C99. It is designed as a shell-like command language with a Tcl-inspired syntax, built-in POSIX job control, a template engine, and a clean C embedding API.
+Vel is a lightweight, embeddable scripting language interpreter written in C. It is designed as a shell-like command language with a clean syntax, built-in POSIX job control, a template engine, and a clean C embedding API.
 
 ## Features
 
-- Tcl-inspired command/word syntax
-- First-class functions with closures via lexical scoping
+- Command/word syntax: every statement is a command invocation
+- First-class functions with lexical scoping
 - Reference-counted string values with copy-on-write semantics
 - Built-in POSIX job control: background jobs, pipelines, signal handling
 - Embedded template engine with `<?vel ... ?>` tags
 - Auto-execution of external programs found on `PATH`
 - Shebang (`#!/usr/bin/env vel`) support
-- Expression evaluator with integer overflow detection
+- Expression evaluator with integer overflow detection and power operator (`**`)
 - Readline support (optional, compile-time flag)
 - Clean public C API for embedding in other applications
 - Cross-platform: Linux, macOS, and partial Windows support
@@ -98,6 +98,7 @@ vel/
 ├── include/     # Header files (vel.h, vel_priv.h, vel_jobs.h)
 ├── src/         # C source files
 ├── docs/        # Documentation
+├── tests/       # Test scripts
 ├── Makefile
 ├── LICENSE
 └── README.md
@@ -112,7 +113,6 @@ Detailed documentation is provided in the `docs/` directory:
 | [docs/LANGUAGE.md](docs/LANGUAGE.md) | Language syntax, data types, and built-in commands |
 | [docs/EMBEDDING.md](docs/EMBEDDING.md) | C API reference for embedding vel in other programs |
 | [docs/INTERNALS.md](docs/INTERNALS.md) | Architecture and internal implementation details |
-| [docs/COMPARISON.md](docs/COMPARISON.md) | Comparison with standard Tcl and gap analysis |
 | [docs/JOBCONTROL.md](docs/JOBCONTROL.md) | POSIX job control and signal handling reference |
 | [docs/TEMPLATE.md](docs/TEMPLATE.md) | Embedded template engine reference |
 

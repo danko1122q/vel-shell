@@ -1,7 +1,5 @@
 # Vel Language Reference
 
-Version: 0.2.0
-
 ---
 
 ## Table of Contents
@@ -31,7 +29,7 @@ Version: 0.2.0
 
 ## Overview
 
-Vel is a command language. Every statement is a command invocation. The first word on a line is the command name; subsequent words are its arguments. This model is similar to Tcl, but vel integrates shell-like features such as external program execution, pipelines, and job control directly into the language.
+Vel is a command language. Every statement is a command invocation. The first word on a line is the command name; subsequent words are its arguments. This model integrates shell-like features such as external program execution, pipelines, and job control directly into the language.
 
 ---
 
@@ -64,7 +62,7 @@ Integers are represented internally as `int64_t`. Floating-point values are `dou
 
 ### Bare Word
 
-Any sequence of non-whitespace, non-special characters. Variable substitution does not occur inside bare words unless the word contains `$`.
+Any sequence of non-whitespace, non-special characters.
 
 ```
 write hello
@@ -114,11 +112,11 @@ Double-quoted strings allow `$name` variable expansion and the following escape 
 
 ### Single-Quoted String: `'text'`
 
-Single-quoted strings allow `$name` variable expansion but no other escape processing. Useful when the string contains backslashes that should not be interpreted.
+Single-quoted strings allow `$name` variable expansion but no other escape processing.
 
 ### Here-Document: `<<DELIM`
 
-Multi-line literal strings. Lines are accumulated until a line consisting solely of the delimiter (optionally with leading whitespace). The delimiter is consumed and not included in the result.
+Multi-line literal strings. Lines are accumulated until a line consisting solely of the delimiter.
 
 ```
 set text <<END
@@ -140,9 +138,19 @@ set x 10
 set greeting "hello world"
 ```
 
+### `set global name value`
+
+Assigns `value` to `name` in the root (global) scope, regardless of the current scope.
+
+```
+func example {} {
+    set global counter 42
+}
+```
+
 ### `local name value`
 
-Creates a variable in the current scope only, even if a variable with the same name exists in a parent scope.
+Creates a variable in the current scope only.
 
 ```
 local counter 0
@@ -160,19 +168,19 @@ By default, a bare `$name` token is equivalent to `set name`. This can be change
 
 ## Control Flow
 
-### `if condition {then-body} [else {else-body}]`
+### `if condition {then-body} [elseif condition {body} ...] [else {else-body}]`
 
-Evaluates `condition` as a vel expression (via `expr`). Executes `then-body` if the result is non-zero and non-empty. Optionally executes `else-body`.
+Evaluates `condition` as a vel expression. Executes the matching branch.
 
 ```
 if {$x > 0} {
     write "positive"
+} elseif {$x == 0} {
+    write "zero"
 } else {
-    write "non-positive"
+    write "negative"
 }
 ```
-
-The condition may also be a command or block whose result is tested for truthiness (non-empty, non-zero string).
 
 ### `while condition {body}`
 
@@ -182,7 +190,7 @@ Repeats `body` as long as `condition` is true.
 set i 0
 while {$i < 5} {
     write $i
-    inc i
+    incr i
 }
 ```
 
@@ -196,13 +204,29 @@ for item {apple banana cherry} {
 }
 ```
 
+### `for {init} {cond} {step} {body}`
+
+C-style for loop with explicit init, condition, step, and body.
+
+```
+for {set i 0} {$i < 5} {incr i} {
+    write $i
+}
+```
+
 ### `foreach var list {body}`
 
-Alias for `for` with slightly different argument handling. Also supports two-variable form for index-value iteration.
+Iterates over list items. When `var` is a brace-quoted list of variable names, each iteration consumes that many items from `list`:
+
+```
+foreach {a b} {1 2 3 4 5 6} {
+    write "$a $b"
+}
+```
 
 ### `break`
 
-Exits the innermost `while` or `for` loop.
+Exits the innermost loop.
 
 ### `continue`
 
@@ -214,39 +238,18 @@ Returns from the current function with an optional value.
 
 ### `result value`
 
-Sets the implicit return value of the current block without stopping execution. Useful for building up a return value across multiple statements.
+Sets the implicit return value of the current block without stopping execution.
 
 ### `switch value { pattern body ... }` or `switch value {pat} {body} ...`
 
-Matches `value` against each `pattern` in order. Executes the corresponding `body` on first match and returns its result. The keyword `default` matches any value and acts as a fallthrough clause.
-
-Two equivalent syntaxes are supported:
-
-**Single-block syntax (recommended)** — all pattern-body pairs are enclosed in one outer block. Patterns are bare words; they are not evaluated as commands.
+Matches `value` against each `pattern` in order. Executes the corresponding `body` on first match. The keyword `default` matches any value.
 
 ```
 switch $color {
     red     { write "stop"    }
     green   { write "go"      }
-    yellow  { write "caution" }
     default { write "unknown" }
 }
-```
-
-**Flat syntax** — each pattern and each body is a separate argument. Patterns must be enclosed in `{}` to prevent them from being evaluated as commands before `switch` is reached.
-
-```
-switch $color {red} { write "stop" } {green} { write "go" } {default} { write "unknown" }
-```
-
-The body argument is always executed as vel code, not returned as a literal string. The return value of `switch` is the return value of the matched body, or empty if no pattern matches.
-
-```
-set label [switch $code {
-    0 { set "" "ok"      }
-    1 { set "" "warning" }
-    default { set "" "error" }
-}]
 ```
 
 ---
@@ -255,7 +258,7 @@ set label [switch $code {
 
 ### `func name {params} {body}`
 
-Defines a named function. `params` is a space-separated list of parameter names. `body` is the code to execute. The function name is registered globally.
+Defines a named function.
 
 ```
 func add {a b} {
@@ -266,7 +269,7 @@ set result [add 3 4]
 
 ### `func {params} {body}` (anonymous)
 
-When called with two arguments, creates an anonymous function with a generated name and returns that name.
+Creates an anonymous function and returns its name.
 
 ```
 set fn [func {x} { expr $x * 2 }]
@@ -275,15 +278,13 @@ set result [$fn 5]
 
 ### `func {body}` (anonymous, variadic)
 
-Creates an anonymous function that accepts all arguments as a list in the built-in `args` variable.
+Creates an anonymous function that accepts all arguments as a list in `args`.
 
 ### `rename old new`
 
 Renames a function. If `new` is empty, deletes the function.
 
 ### Function Calls
-
-A function is called by using its name as a command:
 
 ```
 func greet {name} { write "hello $name" }
@@ -296,7 +297,7 @@ Recursive calls are supported up to a depth of 1000 (configurable via `VEL_MAX_D
 
 ## Lists
 
-Lists in vel are strings where items are separated by whitespace. Items containing spaces are brace-quoted. This is the same model as Tcl.
+Lists in vel are strings where items are separated by whitespace. Items containing spaces are brace-quoted.
 
 ### `list arg1 arg2 ...`
 
@@ -306,41 +307,73 @@ Constructs a properly-quoted list from arguments.
 set items [list "hello world" foo bar]
 ```
 
-### `count list`
+### `count list` / `llength list`
 
 Returns the number of items in `list`.
 
 ```
-set n [count {a b c}]
+set n [llength {a b c}]
 ```
 
-### `index list i`
+### `index list i` / `lindex list i`
 
 Returns the item at zero-based index `i`.
 
 ```
-set second [index {a b c} 1]
+set second [lindex {a b c} 1]
 ```
 
-### `indexof list value`
+### `indexof list value` / `lsearch list value`
 
 Returns the zero-based index of `value` in `list`, or -1 if not found.
 
-### `append list item ...`
+### `slice list start [end]` / `lrange list start end`
 
-Returns a new list with items appended.
+Returns a sublist. `lrange` is inclusive on both ends; `slice` treats end as exclusive.
 
 ```
-set l [append $l newitem]
+set sub [lrange {a b c d} 1 2]   ;# b c
 ```
 
-### `slice list start [end]`
+### `append varname str ...`
 
-Returns a sublist from `start` to `end` (exclusive). If `end` is omitted, slices to the end of the list.
+Appends one or more strings to the variable `varname` in place (string concatenation).
+
+```
+set s "hello"
+append s " world"
+# s is now "hello world"
+```
+
+### `lappend varname item ...`
+
+Appends items to the list stored in variable `varname` and returns the new list.
+
+```
+set lst {a b c}
+lappend lst d e
+# lst is now "a b c d e"
+```
+
+### `linsert list idx val ...`
+
+Returns a new list with `val ...` inserted before index `idx`.
+
+```
+set r [linsert {a b c} 1 X Y]   ;# a X Y b c
+```
+
+### `lreplace list first last ?val ...?`
+
+Returns a new list with elements from `first` to `last` (inclusive) replaced by `val ...`. Pass no replacement values to delete the range.
+
+```
+set r [lreplace {a b c d} 1 2 X]   ;# a X d
+```
 
 ### `filter list {predicate}`
 
-Returns a new list containing only items for which the predicate returns a non-empty, non-zero value. The predicate receives the item as its first argument.
+Returns items for which the predicate returns a non-empty, non-zero value.
 
 ```
 set evens [filter {1 2 3 4 5} {x} { expr $x % 2 == 0 }]
@@ -348,11 +381,7 @@ set evens [filter {1 2 3 4 5} {x} { expr $x % 2 == 0 }]
 
 ### `lmap list {transform}`
 
-Returns a new list where each item has been replaced by the result of applying the transform function.
-
-```
-set doubled [lmap {1 2 3} {x} { expr $x * 2 }]
-```
+Returns a new list with each item replaced by the transform result.
 
 ### `join list [separator]`
 
@@ -362,9 +391,9 @@ Joins list items into a single string with `separator` (default: space).
 set s [join {a b c} ","]
 ```
 
-### `foreach var list {body}`
+### `split string [separator]`
 
-Iterates over list items. When `var` is a two-element list, the first element receives the index and the second receives the value.
+Splits `string` by `separator` (default: whitespace) and returns a list.
 
 ### `lreverse list`
 
@@ -384,7 +413,7 @@ set sorted [lsort {banana apple cherry}]   ;# apple banana cherry
 
 ### `luniq list`
 
-Returns the list with consecutive duplicate elements removed. For complete deduplication, sort the list first.
+Returns the list with consecutive duplicate elements removed.
 
 ```
 set u [luniq [lsort {a b a c b}]]   ;# a b c
@@ -392,15 +421,24 @@ set u [luniq [lsort {a b a c b}]]   ;# a b c
 
 ### `lassign list var1 var2 ... [*rest]`
 
-Assigns elements of `list` to the named variables in order. Variables with no corresponding element are set to the empty string. If the last variable name starts with `*`, it collects all remaining elements as a sublist.
+Assigns elements of `list` to the named variables in order. If the last variable name starts with `*`, it collects all remaining elements.
 
 ```
 lassign {a b c d} x y *rest
 # x=a  y=b  rest={c d}
-
-lassign {p q} first second third
-# first=p  second=q  third=""
 ```
+
+### `concat arg1 arg2 ...`
+
+Concatenates list arguments into a single flat list.
+
+### `subst string`
+
+Performs variable and bracket substitution on `string`.
+
+### `quote value`
+
+Returns a properly brace-quoted version of `value`.
 
 ---
 
@@ -408,7 +446,7 @@ lassign {p q} first second third
 
 ### `expr expression`
 
-Evaluates an arithmetic/logical expression and returns the result as a string.
+Evaluates an arithmetic/logical expression and returns the result.
 
 Supported operators in precedence order (lowest to highest):
 
@@ -423,52 +461,60 @@ Supported operators in precedence order (lowest to highest):
 | `<<` `>>` | bit shift |
 | `+` `-` | addition, subtraction |
 | `*` `/` `\` `%` | multiply, float-divide, integer-divide, modulo |
-| `!` `~` `-` `+` | unary logical-not, bitwise-not, negate, plus |
+| `**` | power (exponentiation) |
+| `!` `~` `-` `+` | unary: logical-not, bitwise-not, negate, plus |
 
 Integer overflow on `+`, `-`, `*` is detected and raises an error. Division by zero raises an error.
 
 ```
 set x [expr 10 * 3 + 2]
-set y [expr $x > 20]
-set z [expr ($x + $y) << 1]
+set y [expr 2 ** 8]       ;# 256
+set z [expr $x > 20]
 ```
 
-### `inc name [amount]`
+### `incr name [amount]` / `inc name [amount]`
 
-Increments the variable `name` by `amount` (default: 1).
+Increments variable `name` by `amount` (default: 1).
 
-### `dec name [amount]`
+```
+set n 5
+incr n      ;# n = 6
+incr n 4    ;# n = 10
+```
 
-Decrements the variable `name` by `amount` (default: 1).
+### `decr name [amount]` / `dec name [amount]`
+
+Decrements variable `name` by `amount` (default: 1).
 
 ### `abs n`
 
-Returns the absolute value of `n`. Returns an integer if `n` is an integer, float otherwise.
+Returns the absolute value of `n`.
 
 ```
 set v [abs -7]    ;# 7
-set v [abs -3.5]  ;# 3.5
 ```
 
-### `max a b`
+### `max n1 n2 [n3 ...]`
 
-Returns the larger of two values.
+Returns the largest of all given values.
 
-### `min a b`
+```
+set m [max 3 7 1 9 2]   ;# 9
+```
 
-Returns the smaller of two values.
+### `min n1 n2 [n3 ...]`
+
+Returns the smallest of all given values.
 
 ### `math subcommand [args]`
 
-Dispatcher for mathematical functions. All results are returned as integer when the result has no fractional part, float otherwise.
-
 | Subcommand | Args | Description |
 |------------|------|-------------|
-| `pi` | — | π (3.14159...) |
-| `e` | — | Euler's number (2.71828...) |
+| `pi` | — | π |
+| `e` | — | Euler's number |
 | `sin` | x | Sine (radians) |
-| `cos` | x | Cosine (radians) |
-| `tan` | x | Tangent (radians) |
+| `cos` | x | Cosine |
+| `tan` | x | Tangent |
 | `asin` | x | Arcsine |
 | `acos` | x | Arccosine |
 | `atan` | x | Arctangent |
@@ -485,9 +531,16 @@ Dispatcher for mathematical functions. All results are returned as integer when 
 
 ```
 set hyp [math sqrt [expr $a*$a + $b*$b]]
-set angle [math atan2 $dy $dx]
-set pi [math pi]
+set pi  [math pi]
 ```
+
+### `rand [max]`
+
+Returns a random integer between 0 and `max-1`. With no argument, returns a float in `[0.0, 1.0)`.
+
+### `sleep seconds`
+
+Pauses execution. Supports fractional seconds.
 
 ---
 
@@ -499,11 +552,11 @@ Returns the byte length of `string`.
 
 ### `substr string start [length]`
 
-Returns a substring starting at `start` for `length` bytes. If `length` is omitted, returns to the end.
+Returns a substring starting at `start` for `length` bytes.
 
 ### `strpos string needle [start]`
 
-Returns the byte offset of the first occurrence of `needle` in `string`, starting at optional `start`. Returns -1 if not found.
+Returns the byte offset of the first occurrence of `needle` in `string`, or -1 if not found.
 
 ### `charat string index`
 
@@ -511,31 +564,19 @@ Returns the character at byte position `index`.
 
 ### `codeat string index`
 
-Returns the ASCII/byte value of the character at byte position `index`.
+Returns the byte value of the character at byte position `index`.
 
 ### `char code`
 
 Returns the single-character string for the given byte value.
 
-### `trim string`
+### `trim string` / `ltrim string` / `rtrim string`
 
-Removes leading and trailing whitespace.
+Remove leading and/or trailing whitespace.
 
-### `ltrim string`
+### `toupper string` / `tolower string`
 
-Removes leading whitespace.
-
-### `rtrim string`
-
-Removes trailing whitespace.
-
-### `toupper string`
-
-Converts string to uppercase.
-
-### `tolower string`
-
-Converts string to lowercase.
+Convert case.
 
 ### `strcmp a b`
 
@@ -557,33 +598,75 @@ Returns 1 if `string` ends with `suffix`.
 
 Replaces all occurrences of `old` with `new` in `string`.
 
-### `split string [separator]`
-
-Splits `string` by `separator` (default: whitespace) and returns a list.
-
-### `concat arg1 arg2 ...`
-
-Concatenates arguments into a single string without separators.
-
-### `quote value`
-
-Returns a properly brace-quoted version of `value` suitable for inclusion in a list.
-
-### `subst string`
-
-Performs variable and bracket substitution on `string` as if it were source code.
-
 ### `format fmt arg1 arg2 ...`
 
-Formats a string using printf-style format specifiers (`%s`, `%d`, `%f`, `%x`, etc.).
+Formats a string using printf-style specifiers (`%s`, `%d`, `%f`, `%x`, etc.).
 
 ### `printf fmt arg1 arg2 ...`
 
 Like `format` but writes the result to stdout.
 
+### `scan string fmt var1 var2 ...`
+
+Parses `string` according to scanf-style format and stores the results in the named variables. Returns the number of successfully converted items.
+
+```
+scan "42 3.14 hello" "%d %f %s" myint myfloat mystr
+```
+
+Supported format specifiers: `%d`, `%i`, `%f`, `%g`, `%e`, `%s`.
+
+### `string length str`
+
+Returns the byte length of `str`.
+
+### `string toupper str` / `string tolower str`
+
+Convert case.
+
+### `string index str idx`
+
+Returns the character at zero-based index `idx`.
+
+### `string range str first last`
+
+Returns characters from `first` to `last` (inclusive, zero-based).
+
+```
+set sub [string range "abcdefgh" 2 5]   ;# cdef
+```
+
+### `string first needle haystack [start]`
+
+Returns the index of the first occurrence of `needle` in `haystack`, or -1.
+
+### `string last needle haystack`
+
+Returns the index of the last occurrence of `needle`.
+
+### `string replace str first last [newstr]`
+
+Returns a new string with characters `first` through `last` replaced by `newstr`.
+
+```
+set r [string replace "hello" 1 3 "ELL"]   ;# hELLo
+```
+
+### `string trim str [chars]` / `string trimleft str [chars]` / `string trimright str [chars]`
+
+Remove characters in `chars` (default: whitespace) from the specified end(s).
+
+### `string compare str1 str2`
+
+Returns negative, zero, or positive.
+
+### `string equal str1 str2`
+
+Returns 1 if equal, 0 otherwise.
+
 ### `string repeat str n`
 
-Returns `str` concatenated `n` times. Returns empty if `n` is 0 or `str` is empty.
+Returns `str` concatenated `n` times.
 
 ```
 set line [string repeat "-" 40]
@@ -591,15 +674,11 @@ set line [string repeat "-" 40]
 
 ### `string reverse str`
 
-Returns the byte-reversed string. Not Unicode-aware.
-
-```
-set rev [string reverse "hello"]   ;# olleh
-```
+Returns the byte-reversed string.
 
 ### `string is type str`
 
-Returns 1 if all characters of `str` match `type`, empty otherwise. An empty string always returns empty.
+Returns 1 if all characters of `str` match `type`, 0 otherwise.
 
 | Type | Condition |
 |------|-----------|
@@ -621,11 +700,10 @@ if {[string is integer $input]} {
 
 ### `string map pairs str`
 
-Multi-pair substitution. `pairs` is a flat list `{old1 new1 old2 new2 ...}`. Scans `str` left-to-right; the first matching pair at each position wins. `pairs` must have an even number of elements.
+Multi-pair substitution. `pairs` is `{old1 new1 old2 new2 ...}`.
 
 ```
-set result [string map {hello hi world earth} "hello world"]
-# hi earth
+set result [string map {a A e E} "apple"]   ;# ApplE
 ```
 
 ---
@@ -634,7 +712,7 @@ set result [string map {hello hi world earth} "hello world"]
 
 ### `write arg1 [arg2 ...]`
 
-Writes arguments to the write callback (stdout by default), separated by spaces, without a trailing newline.
+Writes arguments to stdout, separated by spaces, without a trailing newline.
 
 ### `print arg1 [arg2 ...]`
 
@@ -646,31 +724,35 @@ Writes arguments separated by spaces followed by a newline (shell-style).
 
 ### `read [prompt]`
 
-Reads a line of input. If a `VEL_CB_READ` callback is installed, delegates to it. Otherwise reads from stdin.
+Reads a line of input from the `VEL_CB_READ` callback or stdin.
 
-### `readline`
+### `input [-p prompt] [varname]`
 
-Reads a raw line from stdin. Returns an error at EOF.
+Displays `prompt` (if given) and reads a line from stdin. Optionally stores the result in `varname`.
 
-### `input [prompt]`
+### `store name data` / `writefile path data`
 
-Displays `prompt` (if given) and reads a line from stdin.
+Writes `data` to `path` (or invokes `VEL_CB_STORE` if registered).
 
-### `canread`
+```
+writefile "/tmp/output.txt" "hello\n"
+```
 
-Returns 1 if stdin is readable (not at EOF or error).
+### `read path` / `readfile path`
 
-### `store name data`
+Reads the contents of `path` and returns it as a string.
 
-Invokes the `VEL_CB_STORE` callback to persist key-value data outside the interpreter.
+```
+set contents [readfile "/tmp/output.txt"]
+```
 
 ### `source filename`
 
-Reads and executes the contents of `filename`. Searches via the `VEL_CB_SOURCE` callback if registered.
+Reads and executes the contents of `filename`.
 
 ### `cat [file ...]`
 
-Reads and writes file contents to the write callback. If no file is given, reads from stdin.
+Reads and writes file contents to the write callback.
 
 ### `head [-n N] [file]`
 
@@ -684,21 +766,33 @@ Outputs the last N lines (default 10) of a file.
 
 Counts lines, words, or bytes in a file.
 
-### `grep [-i] [-v] [-n] [-c] [-r] pattern [file ...]`
+### `grep [-i] [-v] [-n] [-c] pattern [file ...]`
 
-Searches for lines matching `pattern` in files. Supports basic substring matching. Flags: `-i` case-insensitive, `-v` invert match, `-n` show line numbers, `-c` count only, `-r` recursive directory search.
+Searches for lines matching `pattern` in files. Flags may appear in any position relative to the pattern and filenames.
+
+- `-i` case-insensitive match
+- `-v` invert match
+- `-n` show line numbers
+- `-c` count only
+
+Pattern anchors are supported: `^` matches start of line, `$` matches end of line.
+
+```
+set r [grep "^error" logfile.txt]
+set r [grep "hello" -i myfile.txt]
+```
 
 ### `tee file`
 
-Reads from the last pipe stage or current output and writes to both stdout and `file`.
+Writes to both stdout and `file`.
 
 ### `redirect {command} file [mode]`
 
-Runs `command` and redirects its stdout to `file`. Mode `a` appends; default overwrites.
+Runs `command` with stdout redirected to `file`. Mode `append` appends; default overwrites.
 
 ### `redirect2 {command} stdout-file stderr-file`
 
-Redirects both stdout and stderr of `command` to separate files.
+Redirects both stdout and stderr to separate files.
 
 ### `redirect_in {command} file`
 
@@ -708,9 +802,34 @@ Runs `command` with stdin redirected from `file`.
 
 ## File System Commands
 
+### `file subcommand path`
+
+Unified file information command.
+
+| Subcommand | Description |
+|------------|-------------|
+| `file exists path` | Returns 1 if path exists, 0 otherwise |
+| `file isfile path` | Returns 1 if path is a regular file |
+| `file isdir path` | Returns 1 if path is a directory |
+| `file size path` | Returns file size in bytes |
+| `file extension path` | Returns the file extension including the dot (e.g. `.vel`) |
+| `file tail path` | Returns the filename component (basename) |
+| `file dir path` | Returns the directory component (dirname) |
+| `file readable path` | Returns 1 if path is readable |
+| `file writable path` | Returns 1 if path is writable |
+| `file executable path` | Returns 1 if path is executable |
+| `file mtime path` | Returns the modification time as a Unix timestamp |
+| `file join path1 path2 ...` | Joins path components |
+
+```
+if {[file exists "/tmp/lock"]} { write "locked" }
+set ext [file extension "script.vel"]   ;# .vel
+set dir [file dir "/tmp/foo/bar.txt"]   ;# /tmp/foo
+```
+
 ### `exists path`
 
-Returns 1 if `path` exists (file or directory).
+Returns 1 if `path` exists (any type).
 
 ### `listdir [dir]`
 
@@ -718,11 +837,11 @@ Returns a list of filenames in `dir` (default: current directory).
 
 ### `ls [-l] [-a] [path]`
 
-Lists directory contents. `-l` for long format, `-a` to include hidden files.
+Lists directory contents.
 
-### `tree [path] [-d] [-L depth]`
+### `tree [path] [-L depth]`
 
-Prints directory tree. `-d` directories only, `-L depth` limits depth.
+Prints directory tree.
 
 ### `find path [-name pattern] [-type f|d] [-maxdepth N]`
 
@@ -730,11 +849,11 @@ Finds files matching criteria under `path`.
 
 ### `stat path`
 
-Returns file metadata as a string (type, size, permissions, mtime).
+Returns file metadata.
 
 ### `touch path`
 
-Creates file if it does not exist; updates mtime if it does.
+Creates or updates a file.
 
 ### `mkdir [-p] path`
 
@@ -742,7 +861,7 @@ Creates a directory. `-p` creates intermediate directories.
 
 ### `rmdir [-r] path`
 
-Removes a directory. `-r` removes recursively.
+Removes a directory.
 
 ### `remove path`
 
@@ -750,7 +869,7 @@ Removes a file.
 
 ### `copy src dst`
 
-Copies a file from `src` to `dst`.
+Copies a file.
 
 ### `move src dst`
 
@@ -758,7 +877,7 @@ Moves or renames a file.
 
 ### `chmod mode path`
 
-Changes file permissions. `mode` is an octal string (e.g., `755`) or symbolic (e.g., `+x`).
+Changes file permissions (octal, e.g. `755`).
 
 ### `chown user[:group] path`
 
@@ -766,31 +885,27 @@ Changes file ownership (Unix only).
 
 ### `ln [-s] target link`
 
-Creates a hard link or, with `-s`, a symbolic link.
+Creates a hard or symbolic link.
 
 ### `cd [dir]`
 
-Changes the working directory of the vel process.
+Changes the working directory.
 
 ### `pwd`
 
 Returns the current working directory.
 
-### `getwd`
-
-Alias for `pwd`.
-
 ### `basename path`
 
-Returns the filename component of a path.
+Returns the filename component.
 
 ### `dirname path`
 
-Returns the directory component of a path.
+Returns the directory component.
 
 ### `glob pattern ...`
 
-Expands shell glob patterns and returns a list of matching paths. Supports tilde expansion.
+Expands shell glob patterns and returns a matching list.
 
 ---
 
@@ -798,39 +913,36 @@ Expands shell glob patterns and returns a list of matching paths. Supports tilde
 
 ### `run cmd [arg ...]`
 
-Executes an external program with stdin, stdout, and stderr inherited from the vel process (live output). Returns the exit code.
+Executes an external program with inherited stdio. Returns the exit code.
 
 ### `exec cmd [arg ...]`
 
-Executes an external program and captures its stdout, returning it as a string.
+Executes an external program and captures its stdout.
 
-### `system cmd [arg ...]`
+### `pipe cmd arg1 arg2 ...`
 
-Runs a command with output capture and a 30-second timeout (configurable via `VEL_SYSTEM_TIMEOUT` environment variable; set to 0 for no limit).
+Executes a command and captures its output. When all arguments are single tokens, they are treated as one command with its arguments. When arguments contain spaces, each is treated as a pipeline stage.
+
+```
+set result [pipe echo "hello from pipe"]
+set lines  [pipe {ls /tmp} {grep "vel"}]
+```
 
 ### `sh {command string}`
 
 Runs a command string via `/bin/sh -c` and returns captured output.
 
-### `pipe {cmd1 args} {cmd2 args} ...`
-
-Creates a Unix pipeline. Each argument is a command specification. Returns the output of the last stage.
-
 ### `shpipe {cmd1 args} {cmd2 args} ...`
 
 Pipeline via `/bin/sh -c` for each stage.
 
-### `spawn cmd [arg ...]`
+### `spawn cmd [arg ...]` / `bg cmd [arg ...]`
 
 Forks and executes a command in the background. Returns the job ID.
 
-### `bg cmd [arg ...]`
-
-Alias for `spawn`.
-
 ### `wait [jid]`
 
-Waits for background job `jid` to finish. If `jid` is omitted, waits for all jobs.
+Waits for background job `jid` to finish.
 
 ### `waitall`
 
@@ -838,19 +950,11 @@ Waits for all background jobs.
 
 ### `fg [jid]`
 
-Brings background job `jid` to the foreground.
+Brings a background job to the foreground.
 
 ### `jobs`
 
-Lists all background jobs with their state and exit code.
-
-### `bglist`
-
-Returns a list of active background job IDs.
-
-### `bgpid jid`
-
-Returns the PID of background job `jid`.
+Lists all background jobs.
 
 ### `killjob jid_or_pid [signal]`
 
@@ -862,7 +966,7 @@ Returns the exit status of a finished background job.
 
 ### `sighandle SIGNAL {vel-code}`
 
-Registers vel code to run when `SIGNAL` is received. Signal handling is deferred to the main loop.
+Registers vel code to run when `SIGNAL` is received. Deferred to the main loop.
 
 ### `exitcode`
 
@@ -874,51 +978,27 @@ Returns the PID of the vel process.
 
 ### `envget name [default]`
 
-Gets the value of environment variable `name`. Returns `default` if not set.
+Gets the value of environment variable `name`.
 
 ### `envset name value`
 
-Sets an environment variable in the current process.
+Sets an environment variable.
 
 ### `env`
 
-Returns a list of all current environment variables as `NAME=VALUE` strings.
+Returns all environment variables as `NAME=VALUE` strings.
 
-### `whoami`
+### `whoami` / `hostname` / `uname` / `uptime` / `which name`
 
-Returns the current username.
-
-### `hostname`
-
-Returns the system hostname.
-
-### `uname [-a] [-s] [-r] [-m]`
-
-Returns system information.
-
-### `uptime`
-
-Returns system uptime.
-
-### `which name`
-
-Returns the full path of a command found on `PATH`.
+Standard system information commands.
 
 ### `date [format]`
 
-Returns the current date and time, formatted by `format` (strftime syntax). Default is `%Y-%m-%d %H:%M:%S`.
-
-### `sleep seconds`
-
-Pauses execution for the given number of seconds (supports fractional values).
-
-### `rand [max]`
-
-Returns a random integer between 0 and `max-1` (default: `RAND_MAX`).
+Returns the current date/time, formatted by `format` (strftime syntax). Default: `%Y-%m-%d %H:%M:%S`.
 
 ### `df [path]`
 
-Returns disk usage information for the filesystem containing `path`.
+Returns disk usage information.
 
 ### `seq start [end] [step]`
 
@@ -962,7 +1042,7 @@ Returns the parameter list of function `name`.
 
 ### `reflect body name`
 
-Returns the body of scripted function `name`. Not available for native functions.
+Returns the body of scripted function `name`.
 
 ### `reflect has-func name`
 
@@ -994,19 +1074,11 @@ Gets or sets the prefix used when expanding `$name` tokens. Default is `set `.
 
 ### `reflect level`
 
-Returns the current call stack depth (number of active scripted function frames).
-
-```
-func inner {} {
-    write [reflect level]   ;# 2 if called from outer
-}
-func outer {} { inner }
-outer
-```
+Returns the current call stack depth.
 
 ### `reflect depth`
 
-Returns the current recursion depth (`vel->depth`), which counts all nested `vel_parse` calls including internal ones.
+Returns the current recursion depth.
 
 ### `eval code`
 
@@ -1014,23 +1086,19 @@ Evaluates `code` as vel script in the current scope.
 
 ### `topeval code`
 
-Evaluates `code` at the global (root) scope.
+Evaluates `code` at the global scope.
 
 ### `upeval code`
 
 Evaluates `code` in the parent scope.
 
-### `enveval env-name {params} {body} arg ...`
-
-Evaluates `body` in a named environment context.
-
 ### `jaileval code`
 
-Evaluates `code` in an isolated scope with no access to parent variables.
+Evaluates `code` in an isolated scope.
 
 ### `watch name {code}`
 
-Registers `code` to be executed whenever variable `name` is assigned a new value.
+Registers `code` to run whenever variable `name` is assigned.
 
 ### `catcher {code}`
 
@@ -1038,16 +1106,16 @@ Registers `code` as the default handler for unknown command names.
 
 ### `unusedname [hint]`
 
-Returns a unique function name not currently in use, based on `hint`.
+Returns a unique function name not currently in use.
 
 ### `upvar localname parentname`
 
-Creates a local alias for a variable in the parent (calling) scope. Reads the parent's current value into `localname` and installs a write-back watch so that subsequent assignments to `localname` propagate back to `parentname` in the caller.
+Creates a local alias that mirrors a variable in the parent (calling) scope.
 
 ```
 func bump {} {
     upvar n counter
-    inc n
+    incr n
 }
 
 set counter 0
@@ -1055,13 +1123,9 @@ bump
 write $counter   ;# 1
 ```
 
-The write-back targets `root_env` if `parentname` lives at global scope (using `set global`), or the immediate parent frame otherwise (using `upeval`).
-
 ---
 
 ## Extended Commands
-
-This section documents commands from `vel_newcmds.c` that do not fit neatly into the categories above.
 
 ### `clock [unit]`
 
@@ -1069,7 +1133,7 @@ Returns the current wall-clock time using `CLOCK_REALTIME`.
 
 | Unit | Return | Description |
 |------|--------|-------------|
-| `s` (default) | float | Seconds since the Unix epoch with nanosecond precision |
+| `s` (default) | float | Seconds since the Unix epoch |
 | `ms` | integer | Milliseconds since the Unix epoch |
 | `us` | integer | Microseconds since the Unix epoch |
 | `ns` | integer | Nanoseconds since the Unix epoch |
@@ -1078,102 +1142,44 @@ Returns the current wall-clock time using `CLOCK_REALTIME`.
 set t0 [clock ms]
 # ... work ...
 set elapsed [expr [clock ms] - $t0]
-write "elapsed: ${elapsed}ms"
 ```
 
 ### `dict subcommand ...`
 
-Implements an associative array stored as a flat key-value list `{k1 v1 k2 v2 ...}`. This format is compatible with Tcl dicts and vel list operations.
+Associative array stored as a flat key-value list `{k1 v1 k2 v2 ...}`.
 
-#### `dict set varname key value`
-
-Sets `key` to `value` in the dict stored in variable `varname`. Updates in place if the key exists; appends a new pair otherwise.
-
-```
-dict set d name Alice
-dict set d age 30
-```
-
-#### `dict get dict key`
-
-Returns the value for `key`, or empty if the key is not present.
+| Subcommand | Description |
+|------------|-------------|
+| `dict set varname key value` | Set key in dict variable |
+| `dict get dict key` | Get value for key |
+| `dict exists dict key` | Returns 1 if key is present |
+| `dict unset varname key` | Remove key from dict variable |
+| `dict keys dict` | List of all keys |
+| `dict values dict` | List of all values |
+| `dict size dict` | Number of key-value pairs |
+| `dict for {kvar vvar} dict body` | Iterate key-value pairs |
 
 ```
-set name [dict get $d name]
-```
+dict set d name "vel"
+dict set d version [reflect version]
+write [dict get $d name]
 
-#### `dict exists dict key`
-
-Returns 1 if `key` is present in the dict, empty otherwise.
-
-```
-if {[dict exists $d email]} { write "has email" }
-```
-
-#### `dict unset varname key`
-
-Removes the key-value pair for `key` from the dict in `varname`. No-op if the key is absent.
-
-#### `dict keys dict`
-
-Returns a list of all keys in the dict.
-
-```
-for k [dict keys $d] { write $k }
-```
-
-#### `dict values dict`
-
-Returns a list of all values in the dict (in insertion order).
-
-#### `dict size dict`
-
-Returns the number of key-value pairs.
-
-```
-set n [dict size $d]
-```
-
-#### `dict for {kvar vvar} dict body`
-
-Iterates over the dict, binding each key and value to `kvar` and `vvar` and executing `body`. Supports `break` and `return`.
-
-```
 dict for {k v} $d {
     write "$k = $v"
 }
 ```
 
-**Example — building and querying a dict:**
-
-```
-dict set config host localhost
-dict set config port 8080
-dict set config debug 1
-
-write "connecting to [dict get $config host]:[dict get $config port]"
-
-if {[dict get $config debug]} {
-    write "debug mode enabled"
-}
-```
-
 ### `base64 encode str`
 
-Encodes the byte string `str` to Base64 using the standard alphabet. No external library is required.
-
-```
-set encoded [base64 encode "hello world"]
-# aGVsbG8gd29ybGQ=
-```
+Encodes `str` to Base64.
 
 ### `base64 decode str`
 
-Decodes a Base64 string. Returns an error if the input contains characters outside the Base64 alphabet. The result is a raw byte string.
+Decodes a Base64 string.
 
 ```
-set decoded [base64 decode "aGVsbG8gd29ybGQ="]
-# hello world
+set enc [base64 encode "hello world"]
+set dec [base64 decode $enc]   ;# hello world
 ```
 
 ---
@@ -1182,18 +1188,7 @@ set decoded [base64 decode "aGVsbG8gd29ybGQ="]
 
 ### `try body [errvar catch_body] [finally fin_body]`
 
-Executes `body`. Supports optional catch and finally clauses. All clause combinations are valid:
-
-```
-try body
-try body errvar catch_body
-try body finally fin_body
-try body errvar catch_body finally fin_body
-```
-
-If an error occurs in `body` and `catch_body` is provided, the error message is bound to `errvar` and `catch_body` is executed.
-
-`fin_body` (the `finally` clause) **always** runs — even if `body` or `catch_body` used `return`, `break`, or raised an uncaught error. After `fin_body` completes, the original error state, stop signal, and return value are restored. Any side effects inside `fin_body` do not override the outer control flow.
+Executes `body`. Supports optional catch and finally clauses.
 
 ```
 try {
@@ -1205,20 +1200,11 @@ try {
 }
 ```
 
-```
-func open_and_process {file} {
-    set f [fopen $file]
-    try {
-        process $f
-    } finally {
-        fclose $f   ;# runs even if process errors or returns early
-    }
-}
-```
+`fin_body` always runs, even if `body` used `return`, `break`, or raised an error.
 
 ### `error message`
 
-Raises an error with the given message. Halts execution of the current statement chain and propagates up to the nearest `try` block.
+Raises an error with the given message.
 
 ---
 
@@ -1247,6 +1233,7 @@ Block comments start with `##` and end with `##`. A triple `###` is not a block 
 Vel uses lexical scoping with dynamic variable lookup. Each function call creates a new environment. Variable lookup walks the environment chain from innermost to outermost.
 
 - `set` writes to the nearest existing binding, or creates a new one in the current scope.
+- `set global` always writes to the root scope.
 - `local` always creates a new binding in the current scope.
 - `topeval` executes code at the global scope.
 - `upeval` executes code one scope level up.
@@ -1266,14 +1253,10 @@ Vel uses lexical scoping with dynamic variable lookup. Each function call create
 
 ## Shebang Support
 
-Vel treats `#` as a line comment, so a shebang line is silently ignored:
-
 ```vel
 #!/usr/bin/env vel
 write "hello"
 ```
-
-Mark the file executable and ensure `vel` is on `PATH`:
 
 ```sh
 chmod +x script.vel
