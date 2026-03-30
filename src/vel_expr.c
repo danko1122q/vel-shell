@@ -190,7 +190,29 @@ static void expr_muldiv(expr_ctx_t *ctx)
 
     while (!ctx->err && ctx->pos < ctx->len) {
         char c  = ctx->src[ctx->pos];
-        char nc = ctx->src[ctx->pos + 1];
+        char nc = (ctx->pos + 1 < ctx->len) ? ctx->src[ctx->pos + 1] : 0;
+
+        /* ** power operator — must be checked before single '*' */
+        if (c == '*' && nc == '*') {
+            ctx->pos += 2;
+            SAVE_LHS(expr_unary);
+            {
+                double lhd = (lt == EXPR_FLT) ? lf : (double)li;
+                double rhd = (ctx->type == EXPR_FLT) ? ctx->dval : (double)ctx->ival;
+                ctx->dval  = pow(lhd, rhd);
+                ctx->type  = EXPR_FLT;
+                /* downgrade to int when result is a whole number */
+                if (fmod(ctx->dval, 1.0) == 0.0 &&
+                    ctx->dval >= -9.2e18 && ctx->dval <= 9.2e18) {
+                    ctx->ival = (vel_int_t)ctx->dval;
+                    ctx->type = EXPR_INT;
+                }
+            }
+            END_SAVE;
+            expr_skip_ws(ctx);
+            continue;
+        }
+
         if ((c != '*' && c != '/' && c != '\\' && c != '%') || is_bad_punct(nc))
             break;
 
@@ -437,7 +459,13 @@ vel_val_t vel_eval_expr(vel_t vel, vel_val_t code)
 {
     expr_ctx_t ctx;
 
+    /* BUG FIX: set skip_redir so the lexer treats '>' '<' '|' as plain
+     * characters during substitution, not as shell redirect operators.
+     * Without this, "5 > 10" is mangled into "redirect 5 10" before
+     * the expression parser ever sees it. */
+    vel->skip_redir = 1;
     code = vel_subst_val(vel, code);
+    vel->skip_redir = 0;
     if (vel->err_code) return NULL;
 
     ctx.src = vel_str(code);

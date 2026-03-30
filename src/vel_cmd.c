@@ -492,21 +492,64 @@ static VELCB vel_val_t cmd_continue(vel_t vel, size_t argc, vel_val_t *argv)
 
 static VELCB vel_val_t cmd_if(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    vel_val_t cond;
-    int base = 0, inv = 0, truth;
+    /* BUG FIX: properly handle else / elseif keyword chains.
+     *
+     * Old code just did argv[base+2] unconditionally when the main
+     * condition was false -- "else" was passed straight to vel_parse_val
+     * which tried to call a command named "else" and failed.
+     *
+     * New algorithm: iterate through the argument list in chunks:
+     *   if  {cond} {body}
+     *   elseif {cond} {body}
+     *   elseif {cond} {body}
+     *   else   {body}
+     *
+     * The "not" prefix inverts only the very first condition.
+     */
+    int     base = 0, inv = 0, truth;
+    size_t  i;
 
     if (!argc) return NULL;
     if (!strcmp(vel_str(argv[0]), "not")) { base = inv = 1; }
     if (argc < (size_t)base + 2) return NULL;
 
-    cond = vel_eval_expr(vel, argv[base]);
-    if (!cond || vel->err_code) return NULL;
-    truth = vel_bool(cond);
-    if (inv) truth = !truth;
-    vel_val_free(cond);
+    /* ---- evaluate the primary condition ---- */
+    {
+        vel_val_t cond = vel_eval_expr(vel, argv[base]);
+        if (!cond || vel->err_code) return NULL;
+        truth = vel_bool(cond);
+        if (inv) truth = !truth;
+        vel_val_free(cond);
+    }
 
-    if (truth)                        return vel_parse_val(vel, argv[base + 1], 0);
-    if (argc > (size_t)base + 2)      return vel_parse_val(vel, argv[base + 2], 0);
+    if (truth) return vel_parse_val(vel, argv[base + 1], 0);
+
+    /* ---- scan the remaining args for elseif / else ---- */
+    i = (size_t)base + 2;
+    while (i < argc) {
+        const char *kw = vel_str(argv[i]);
+
+        if (!strcmp(kw, "else")) {
+            /* else {body} */
+            if (i + 1 < argc) return vel_parse_val(vel, argv[i + 1], 0);
+            return NULL;
+        }
+
+        if (!strcmp(kw, "elseif")) {
+            /* elseif {cond} {body} */
+            if (i + 2 >= argc) return NULL;
+            vel_val_t cond = vel_eval_expr(vel, argv[i + 1]);
+            if (!cond || vel->err_code) return NULL;
+            truth = vel_bool(cond);
+            vel_val_free(cond);
+            if (truth) return vel_parse_val(vel, argv[i + 2], 0);
+            i += 3;
+            continue;
+        }
+
+        /* Unknown keyword — stop gracefully */
+        break;
+    }
     return NULL;
 }
 
@@ -573,28 +616,71 @@ static VELCB vel_val_t cmd_while(vel_t vel, size_t argc, vel_val_t *argv)
 
 static VELCB vel_val_t cmd_for(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    vel_val_t cond, r = NULL;
-    if (argc < 4) return NULL;
+    vel_val_t r = NULL;
 
-    vel_val_free(vel_parse_val(vel, argv[0], 0));
-    while (!vel->err_code && !vel->env->stop) {
-        cond = vel_eval_expr(vel, argv[1]);
-        if (!cond || vel->err_code) return NULL;
-        if (!vel_bool(cond)) { vel_val_free(cond); break; }
-        vel_val_free(cond);
-        vel_val_free(r);
-        r = vel_parse_val(vel, argv[3], 0);
-        /* handle continue */
-        if (vel->env->stop == 2 && !vel->env->retval_set)
-            vel->env->stop = 0;
-        if (!vel->env->stop)
-            vel_val_free(vel_parse_val(vel, argv[2], 0));
+    /*
+     * 3-arg syntax: for varname list body
+     * Iterates list, assigning each element to varname.
+     * This is the Tcl-compatible "foreach" shorthand.
+     */
+    if (argc == 3) {
+        vel_list_t  list;
+        size_t      i;
+        const char *vname = vel_str(argv[0]);
+
+        list = vel_subst_list(vel, argv[1]);
+        vel_env_push(vel);
+
+        for (i = 0; i < vel_list_len(list) && !vel->env->stop && !vel->err_code; i++) {
+            vel_var_set(vel, vname, vel_list_get(list, i), VEL_VAR_LOCAL_NEW);
+            vel_val_free(r);
+            r = vel_parse_val(vel, argv[2], 0);
+            if (vel->env->stop == 2 && !vel->env->retval_set)
+                vel->env->stop = 0;
+        }
+
+        {
+            int       stop_sig = vel->env->stop;
+            int       ret_set  = vel->env->retval_set;
+            vel_val_t retv     = ret_set ? vel_val_clone(vel->env->retval) : NULL;
+            vel_env_pop(vel);
+            if (stop_sig && !ret_set) vel->env->stop = 0;
+            else if (ret_set) {
+                vel_val_free(vel->env->retval);
+                vel->env->retval = retv; vel->env->retval_set = 1; vel->env->stop = stop_sig;
+            } else { vel_val_free(retv); }
+        }
+        vel_list_free(list);
+        return r;
     }
 
-    if (vel->env->stop && !vel->env->retval_set)
-        vel->env->stop = 0;
+    /*
+     * 4-arg C-style: for {init} {cond} {step} {body}
+     */
+    {
+        vel_val_t cond;
+        if (argc < 4) return NULL;
 
-    return r;
+        vel_val_free(vel_parse_val(vel, argv[0], 0));
+        while (!vel->err_code && !vel->env->stop) {
+            cond = vel_eval_expr(vel, argv[1]);
+            if (!cond || vel->err_code) return NULL;
+            if (!vel_bool(cond)) { vel_val_free(cond); break; }
+            vel_val_free(cond);
+            vel_val_free(r);
+            r = vel_parse_val(vel, argv[3], 0);
+            /* handle continue */
+            if (vel->env->stop == 2 && !vel->env->retval_set)
+                vel->env->stop = 0;
+            if (!vel->env->stop)
+                vel_val_free(vel_parse_val(vel, argv[2], 0));
+        }
+
+        if (vel->env->stop && !vel->env->retval_set)
+            vel->env->stop = 0;
+
+        return r;
+    }
 }
 
 /* ============================================================
@@ -642,10 +728,12 @@ static VELCB vel_val_t cmd_indexof(vel_t vel, size_t argc, vel_val_t *argv)
     return r;
 }
 
+/* append — string concatenation (Tcl semantics)
+ *   append varname str1 str2 ...   -> concatenate strings onto var
+ */
 static VELCB vel_val_t cmd_append(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    vel_list_t  list;
-    vel_val_t   r;
+    vel_val_t   cur, r;
     size_t      i, base = 1;
     int         mode = VEL_VAR_LOCAL;
     const char *vname;
@@ -659,13 +747,61 @@ static VELCB vel_val_t cmd_append(vel_t vel, size_t argc, vel_val_t *argv)
         mode  = VEL_VAR_GLOBAL;
     }
 
-    list = vel_subst_list(vel, vel_var_get(vel, vname));
+    cur = vel_var_get(vel, vname);
+    r   = val_make(NULL);
+    if (cur) vel_val_cat(r, cur);
     for (i = base; i < argc; i++)
-        vel_list_push(list, vel_val_clone(argv[i]));
-    r = vel_list_pack(list, 1);
-    vel_list_free(list);
+        vel_val_cat(r, argv[i]);
     vel_var_set(vel, vname, r, mode);
     return r;
+}
+
+/* lappend — append items to a list
+ *   lappend varname item...  -> modify var in-place, return new list
+ *   lappend $listval item... -> treat first arg as list value (no var update)
+ */
+static VELCB vel_val_t cmd_lappend(vel_t vel, size_t argc, vel_val_t *argv)
+{
+    vel_list_t  list;
+    vel_val_t   r;
+    size_t      i, base = 1;
+    int         mode  = VEL_VAR_LOCAL;
+    const char *vname;
+    int         is_var;
+
+    if (argc < 2) return NULL;
+    vname = vel_str(argv[0]);
+
+    if (!strcmp(vname, "global")) {
+        if (argc < 3) return NULL;
+        vname = vel_str(argv[1]);
+        base  = 2;
+        mode  = VEL_VAR_GLOBAL;
+    }
+
+    /* Determine if first arg is a variable name with an existing var,
+     * or a raw list value (e.g. called as [lappend $lst item]).
+     * We check: no whitespace in name AND the var actually exists. */
+    is_var = (strchr(vname, ' ') == NULL && strchr(vname, '\t') == NULL &&
+              vel_var_get(vel, vname) != NULL);
+
+    if (is_var) {
+        list = vel_subst_list(vel, vel_var_get(vel, vname));
+        for (i = base; i < argc; i++)
+            vel_list_push(list, vel_val_clone(argv[i]));
+        r = vel_list_pack(list, 1);
+        vel_list_free(list);
+        vel_var_set(vel, vname, r, mode);
+        return r;
+    } else {
+        /* treat argv[0] as a list value directly */
+        list = vel_subst_list(vel, argv[0]);
+        for (i = 1; i < argc; i++)
+            vel_list_push(list, vel_val_clone(argv[i]));
+        r = vel_list_pack(list, 1);
+        vel_list_free(list);
+        return r;
+    }
 }
 
 static VELCB vel_val_t cmd_slice(vel_t vel, size_t argc, vel_val_t *argv)
@@ -760,40 +896,66 @@ static VELCB vel_val_t cmd_concat(vel_t vel, size_t argc, vel_val_t *argv)
 
 static VELCB vel_val_t cmd_foreach(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    vel_list_t  list, rlist;
-    vel_val_t   r;
-    size_t      i, listidx = 0, codeidx = 1;
-    const char *vname = "i";
+    vel_list_t  list, rlist, varnames;
+    vel_val_t   r = NULL;
+    size_t      i, j, listidx, codeidx;
+    size_t      nvar;
 
     if (argc < 2) return NULL;
-    if (argc >= 3) { vname = vel_str(argv[0]); listidx = 1; codeidx = 2; }
+
+    if (argc == 2) {
+        /* foreach list body — iterate with implicit var "i" */
+        listidx = 0; codeidx = 1;
+        varnames = NULL; nvar = 1;
+    } else {
+        /* foreach varspec list body */
+        listidx = 1; codeidx = 2;
+        varnames = vel_subst_list(vel, argv[0]);
+        nvar = vel_list_len(varnames);
+        if (!nvar) nvar = 1;
+    }
 
     list  = vel_subst_list(vel, argv[listidx]);
     rlist = vel_list_new();
 
-    /* FIX: push a scope so the iterator variable doesn't leak to caller */
     vel_env_push(vel);
 
-    for (i = 0; i < vel_list_len(list); i++) {
-        vel_val_t rv;
-        vel_var_set(vel, vname, vel_list_get(list, i), VEL_VAR_LOCAL_NEW);
-        rv = vel_parse_val(vel, argv[codeidx], 0);
-        /* handle continue */
-        if (vel->env->stop == 2 && !vel->env->retval_set) {
-            vel->env->stop = 0;
-            vel_val_free(rv);
-            continue;
+    if (nvar <= 1) {
+        /* single variable */
+        const char *vname = (varnames && vel_list_len(varnames) > 0)
+                            ? vel_str(vel_list_get(varnames, 0)) : "i";
+
+        for (i = 0; i < vel_list_len(list); i++) {
+            vel_val_t rv;
+            vel_var_set(vel, vname, vel_list_get(list, i), VEL_VAR_LOCAL_NEW);
+            rv = vel_parse_val(vel, argv[codeidx], 0);
+            if (vel->env->stop == 2 && !vel->env->retval_set) {
+                vel->env->stop = 0; vel_val_free(rv); continue;
+            }
+            if (rv && rv->len) vel_list_push(rlist, rv); else vel_val_free(rv);
+            if (vel->env->stop || vel->err_code) break;
         }
-        if (rv->len) vel_list_push(rlist, rv);
-        else         vel_val_free(rv);
-        if (vel->env->stop || vel->err_code) break;
+    } else {
+        /* multi-variable: consume nvar items per iteration */
+        for (i = 0; i + nvar <= vel_list_len(list) && !vel->env->stop && !vel->err_code; i += nvar) {
+            vel_val_t rv;
+            for (j = 0; j < nvar; j++)
+                vel_var_set(vel, vel_str(vel_list_get(varnames, j)),
+                            vel_list_get(list, i + j), VEL_VAR_LOCAL_NEW);
+            rv = vel_parse_val(vel, argv[codeidx], 0);
+            if (vel->env->stop == 2 && !vel->env->retval_set) {
+                vel->env->stop = 0; vel_val_free(rv); continue;
+            }
+            if (rv && rv->len) vel_list_push(rlist, rv); else vel_val_free(rv);
+            if (vel->env->stop || vel->err_code) break;
+        }
     }
 
     /* propagate break/return before popping */
     {
-        int   stop_sig  = vel->env->stop;
-        int   ret_set   = vel->env->retval_set;
-        vel_val_t retv  = ret_set ? vel_val_clone(vel->env->retval) : NULL;
+        int       stop_sig = vel->env->stop;
+        int       ret_set  = vel->env->retval_set;
+        vel_val_t retv     = ret_set ? vel_val_clone(vel->env->retval) : NULL;
         vel_env_pop(vel);
         if (stop_sig && !ret_set)
             vel->env->stop = 0;   /* consume break */
@@ -810,8 +972,155 @@ static VELCB vel_val_t cmd_foreach(vel_t vel, size_t argc, vel_val_t *argv)
     r = vel_list_pack(rlist, 1);
     vel_list_free(list);
     vel_list_free(rlist);
+    if (varnames) vel_list_free(varnames);
     return r;
 }
+
+/* linsert — insert items into list at given index
+ *   linsert list idx val1 val2 ...
+ */
+static VELCB vel_val_t cmd_linsert(vel_t vel, size_t argc, vel_val_t *argv)
+{
+    vel_list_t list, out;
+    vel_val_t  r;
+    size_t     i, idx, n;
+
+    if (argc < 2) return argc ? vel_val_clone(argv[0]) : NULL;
+    list = vel_subst_list(vel, argv[0]);
+    n    = vel_list_len(list);
+    idx  = (argc >= 2) ? (size_t)vel_int(argv[1]) : n;
+    if (idx > n) idx = n;
+
+    out = vel_list_new();
+    for (i = 0; i < idx; i++)
+        vel_list_push(out, vel_val_clone(vel_list_get(list, i)));
+    for (i = 2; i < argc; i++)
+        vel_list_push(out, vel_val_clone(argv[i]));
+    for (i = idx; i < n; i++)
+        vel_list_push(out, vel_val_clone(vel_list_get(list, i)));
+
+    vel_list_free(list);
+    r = vel_list_pack(out, 1);
+    vel_list_free(out);
+    return r;
+}
+
+/* lreplace — replace elements [first..last] (inclusive) with new values
+ *   lreplace list first last ?val1 val2 ...?
+ */
+static VELCB vel_val_t cmd_lreplace(vel_t vel, size_t argc, vel_val_t *argv)
+{
+    vel_list_t list, out;
+    vel_val_t  r;
+    size_t     i, n;
+    vel_int_t  first, last;
+
+    if (argc < 3) return argc ? vel_val_clone(argv[0]) : NULL;
+    list  = vel_subst_list(vel, argv[0]);
+    n     = vel_list_len(list);
+    first = vel_int(argv[1]);
+    last  = vel_int(argv[2]);
+
+    if (first < 0) first = 0;
+    if ((size_t)first > n) first = (vel_int_t)n;
+    if (last < 0) last = -1;   /* nothing removed */
+    if ((size_t)last >= n) last = (vel_int_t)(n - 1);
+
+    out = vel_list_new();
+    for (i = 0; i < (size_t)first; i++)
+        vel_list_push(out, vel_val_clone(vel_list_get(list, i)));
+    for (i = 3; i < argc; i++)
+        vel_list_push(out, vel_val_clone(argv[i]));
+    for (i = (size_t)(last + 1); i < n; i++)
+        vel_list_push(out, vel_val_clone(vel_list_get(list, i)));
+
+    vel_list_free(list);
+    r = vel_list_pack(out, 1);
+    vel_list_free(out);
+    return r;
+}
+
+/* scan — parse a string according to a format string (sscanf-style)
+ *   scan string fmt varname1 varname2 ...
+ * Returns number of successfully converted items.
+ * Supported: %d %i %f %g %e %s
+ */
+static VELCB vel_val_t cmd_scan(vel_t vel, size_t argc, vel_val_t *argv)
+{
+    const char *src, *fmt, *p, *sptr;
+    size_t      varidx;
+    int         nmatched = 0;
+
+    if (argc < 2) return NULL;
+    src    = vel_str(argv[0]);
+    fmt    = vel_str(argv[1]);
+    varidx = 2;
+    sptr   = src;
+
+    for (p = fmt; *p && varidx < argc; ) {
+        if (*p != '%') {
+            /* literal: skip matching char in src */
+            if (isspace((unsigned char)*p)) {
+                while (*sptr && isspace((unsigned char)*sptr)) sptr++;
+            } else {
+                if (*sptr == *p) sptr++;
+            }
+            p++; continue;
+        }
+        p++;
+        if (!*p) break;
+        if (*p == '%') { if (*sptr == '%') sptr++; p++; continue; }
+
+        /* skip width (not fully honored, kept for format compat) */
+        while (*p && isdigit((unsigned char)*p)) p++;
+        if (!*p) break;
+
+        {
+            const char *vname = vel_str(argv[varidx]);
+            char        conv  = *p++;
+            int         consumed = 0;
+
+            switch (conv) {
+            case 'd': case 'i': {
+                long long iv = 0;
+                if (sscanf(sptr, "%lld%n", &iv, &consumed) == 1) {
+                    vel_val_t v = vel_val_int((vel_int_t)iv);
+                    vel_var_set(vel, vname, v, VEL_VAR_LOCAL);
+                    vel_val_free(v);
+                    sptr += consumed; nmatched++;
+                }
+                break;
+            }
+            case 'f': case 'g': case 'e': case 'E': case 'G': {
+                double dv = 0.0;
+                if (sscanf(sptr, "%lf%n", &dv, &consumed) == 1) {
+                    vel_val_t v = vel_val_dbl(dv);
+                    vel_var_set(vel, vname, v, VEL_VAR_LOCAL);
+                    vel_val_free(v);
+                    sptr += consumed; nmatched++;
+                }
+                break;
+            }
+            case 's': {
+                char sbuf[65536]; sbuf[0] = '\0';
+                if (sscanf(sptr, "%65535s%n", sbuf, &consumed) == 1) {
+                    vel_val_t v = vel_val_str(sbuf);
+                    vel_var_set(vel, vname, v, VEL_VAR_LOCAL);
+                    vel_val_free(v);
+                    sptr += consumed; nmatched++;
+                }
+                break;
+            }
+            default: break;
+            }
+            varidx++;
+            /* skip whitespace between tokens */
+            while (*sptr && isspace((unsigned char)*sptr)) sptr++;
+        }
+    }
+    return vel_val_int((vel_int_t)nmatched);
+}
+
 
 static VELCB vel_val_t cmd_lmap(vel_t vel, size_t argc, vel_val_t *argv)
 {
@@ -1455,6 +1764,13 @@ void register_builtins(vel_t vel)
     vel_register(vel, "index",      cmd_index);
     vel_register(vel, "indexof",    cmd_indexof);
     vel_register(vel, "append",     cmd_append);
+    vel_register(vel, "lappend",    cmd_lappend);  /* list-append, Tcl-style */
+    vel_register(vel, "llength",    cmd_count);    /* Tcl-compatible alias */
+    vel_register(vel, "lindex",     cmd_index);    /* Tcl-compatible alias */
+    vel_register(vel, "lrange",     cmd_slice);    /* Tcl-compatible alias */
+    vel_register(vel, "lsearch",    cmd_indexof);  /* Tcl-compatible alias */
+    vel_register(vel, "linsert",    cmd_linsert);
+    vel_register(vel, "lreplace",   cmd_lreplace);
     vel_register(vel, "slice",      cmd_slice);
     vel_register(vel, "filter",     cmd_filter);
     vel_register(vel, "list",       cmd_list);
@@ -1463,10 +1779,13 @@ void register_builtins(vel_t vel)
     vel_register(vel, "foreach",    cmd_foreach);
     vel_register(vel, "lmap",       cmd_lmap);
     vel_register(vel, "join",       cmd_join);
+    vel_register(vel, "scan",       cmd_scan);
     /* Math */
     vel_register(vel, "expr",       cmd_expr);
     vel_register(vel, "inc",        cmd_inc);
     vel_register(vel, "dec",        cmd_dec);
+    vel_register(vel, "incr",       cmd_inc);   /* Tcl-compatible alias */
+    vel_register(vel, "decr",       cmd_dec);   /* Tcl-compatible alias */
     vel_register(vel, "rand",       cmd_rand);
     vel_register(vel, "sleep",      cmd_sleep);
     /* Strings */

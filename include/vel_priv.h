@@ -141,6 +141,7 @@ struct vel_s {
     size_t      src_len;
     size_t      pos;
     int         skip_eol;
+    int         skip_redir; /* set to 1 inside vel_eval_expr: treat > < | as plain chars */
 
     /* function table */
     vel_fn_t   *fn;

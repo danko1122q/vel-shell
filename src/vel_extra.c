@@ -608,144 +608,207 @@ static VELCB vel_val_t cmd_wc(vel_t vel, size_t argc, vel_val_t *argv)
  *   grep -c pattern file   -> count matching lines
  * ========================================================= */
 
+/*
+ * grep_match_line — cocokkan satu baris terhadap pola.
+ *
+ * Mendukung:
+ *   ^pola   — anchor awal baris
+ *   pola$   — anchor akhir baris
+ *   ^pola$  — exact match
+ *   pola    — substring biasa (strstr)
+ *
+ * Parameter `line` boleh mengandung '\n' di akhir; fungsi ini
+ * mengabaikannya saat menghitung panjang untuk anchor '$'.
+ */
+static int grep_match_line(const char *line, const char *pat,
+                           int anchor_start, int anchor_end,
+                           const char *inner, size_t inner_len)
+{
+    /* panjang baris tanpa trailing newline */
+    size_t llen = strlen(line);
+    while (llen > 0 && (line[llen-1] == '\n' || line[llen-1] == '\r'))
+        llen--;
+
+    (void)pat; /* tidak dipakai langsung, sudah dipecah ke inner */
+
+    if (anchor_start && anchor_end) {
+        /* exact: panjang harus sama dan isi cocok */
+        return (llen == inner_len &&
+                strncmp(line, inner, inner_len) == 0);
+    }
+    if (anchor_start) {
+        /* harus dimulai dari karakter pertama */
+        return (llen >= inner_len &&
+                strncmp(line, inner, inner_len) == 0);
+    }
+    if (anchor_end) {
+        /* harus berakhir tepat sebelum newline */
+        if (llen < inner_len) return 0;
+        return (strncmp(line + llen - inner_len, inner, inner_len) == 0);
+    }
+    /* substring biasa */
+    if (inner_len == 0) return 1;   /* pola kosong cocok semua */
+    return (strstr(line, inner) != NULL);
+}
+
 static VELCB vel_val_t cmd_grep(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    int         opt_i = 0, opt_v = 0, opt_n = 0, opt_c = 0;
-    size_t      argi  = 0, i;
-    const char *pattern;
-    vel_val_t   out;
+    /* ----------------------------------------------------------------
+     * BUG #1 FIX: two-pass argument parsing.
+     *
+     * Parsing lama:  berhenti di argumen pertama non-flag → flag di
+     * belakang pattern (grep "pat" -i file) tidak terdeteksi dan
+     * dianggap nama file → fopen("-i") gagal.
+     *
+     * Perbaikan: pass-1 kumpulkan semua flag, pass-2 kumpulkan
+     * pattern (non-flag pertama) dan nama file (non-flag berikutnya).
+     * Urutan flag/pattern/file kini bebas.
+     * ---------------------------------------------------------------- */
+    int    opt_i = 0, opt_v = 0, opt_n = 0, opt_c = 0;
+    size_t i;
+    const char *pattern = NULL;
 
-    for (argi = 0; argi < argc; argi++) {
-        const char *s = vel_str(argv[argi]);
-        if (s[0] != '-') break;
-        for (const char *p = s + 1; *p; p++) {
-            if (*p == 'i') opt_i = 1;
-            else if (*p == 'v') opt_v = 1;
-            else if (*p == 'n') opt_n = 1;
-            else if (*p == 'c') opt_c = 1;
+    /* Pass 1: kumpulkan flag */
+    for (i = 0; i < argc; i++) {
+        const char *s = vel_str(argv[i]);
+        if (s[0] == '-' && s[1] != '\0') {
+            const char *p;
+            for (p = s + 1; *p; p++) {
+                if      (*p == 'i') opt_i = 1;
+                else if (*p == 'v') opt_v = 1;
+                else if (*p == 'n') opt_n = 1;
+                else if (*p == 'c') opt_c = 1;
+            }
         }
     }
 
-    if (argi >= argc) { vel_error_set(vel, "grep: no pattern"); return NULL; }
-    pattern = vel_str(argv[argi++]);
+    /* Pass 2: pattern = non-flag pertama; file = non-flag berikutnya */
+    size_t file_idx[256];
+    size_t nfiles = 0;
+    for (i = 0; i < argc && nfiles < 255; i++) {
+        const char *s = vel_str(argv[i]);
+        if (s[0] == '-' && s[1] != '\0') continue;
+        if (!pattern) { pattern = s; continue; }
+        file_idx[nfiles++] = i;
+    }
 
-    out = val_make(NULL);
+    if (!pattern) { vel_error_set(vel, "grep: pattern required"); return NULL; }
 
-    /* lowercase pattern copy for case-insensitive */
-    char *patlo = vel_strdup(pattern);
-    if (opt_i) for (i = 0; patlo[i]; i++) patlo[i] = (char)tolower((unsigned char)patlo[i]);
+    /* ----------------------------------------------------------------
+     * BUG #3 FIX: anchor support.
+     *
+     * Kode lama hanya memakai strstr — tidak mengenal '^' atau '$'.
+     * Perbaikan: deteksi anchor lalu pakai grep_match_line() yang
+     * menangani ^, $, ^…$, dan substring biasa.
+     * ---------------------------------------------------------------- */
+    char  *pat_work = vel_strdup(pattern);
+    size_t pat_len  = strlen(pat_work);
 
-    /* Helper lambda inline: proses satu baris */
-    #define GREP_LINE(buf, lineno, match_count) do { \
-        char *haystack = (buf); \
-        char linelo[4096]; \
-        if (opt_i) { \
-            size_t _k; \
-            for (_k = 0; (buf)[_k] && _k < sizeof(linelo)-1; _k++) \
-                linelo[_k] = (char)tolower((unsigned char)(buf)[_k]); \
-            linelo[_k] = '\0'; \
-            haystack = linelo; \
-        } \
-        int found = (strstr(haystack, patlo) != NULL); \
-        if (opt_v) found = !found; \
-        if (found) { \
-            (match_count)++; \
-            if (!opt_c) { \
-                char prefix[64] = {0}; \
-                if (opt_n) snprintf(prefix, sizeof(prefix), "%lld:", (long long)(lineno)); \
-                vel_val_cat_str(out, prefix); \
-                vel_val_cat_str(out, (buf)); \
-            } \
-        } \
-    } while(0)
+    /* turunkan ke huruf kecil jika -i */
+    if (opt_i)
+        for (i = 0; pat_work[i]; i++)
+            pat_work[i] = (char)tolower((unsigned char)pat_work[i]);
 
-    if (argi >= argc) {
-        /* Tidak ada file — baca dari _pipe_in (hasil pipe sebelumnya) */
-        vel_val_t pipe_in = vel_var_get(vel, "_pipe_in");
-        if (!pipe_in || !vel_str(pipe_in)[0]) {
-            vel_val_free(pipe_in);
-            vel_error_set(vel, "grep: no file");
-            vel_val_free(out); free(patlo); return NULL;
-        }
-        /* proses line per line dari string */
-        const char *src = vel_str(pipe_in);
-        long long lineno = 0, match_count = 0;
-        char buf[4096];
-        const char *p = src;
+    int    anchor_start = (pat_work[0] == '^');
+    int    anchor_end   = (pat_len > 0 && pat_work[pat_len - 1] == '$');
+    /* strip anchor karakter dari pola */
+    size_t inner_start  = anchor_start ? 1u : 0u;
+    size_t inner_end    = pat_len - (anchor_end ? 1u : 0u);
+    size_t inner_len    = (inner_end > inner_start) ? (inner_end - inner_start) : 0u;
+    const char *inner   = pat_work + inner_start;
+
+    /* Macro: cocokkan satu baris (sudah di-lowercase jika opt_i) */
+#define DO_MATCH(line) \
+    grep_match_line((line), pat_work, anchor_start, anchor_end, inner, inner_len)
+
+    /* Macro: proses satu baris mentah dari file/pipe */
+#define PROC_LINE(raw, lineno, mcnt) do {                               \
+    char  _lo[4096]; const char *_hay = (raw);                          \
+    if (opt_i) {                                                         \
+        size_t _k;                                                       \
+        for (_k=0; (raw)[_k] && _k < sizeof(_lo)-1; _k++)               \
+            _lo[_k] = (char)tolower((unsigned char)(raw)[_k]);           \
+        _lo[_k] = '\0'; _hay = _lo;                                      \
+    }                                                                    \
+    int _found = DO_MATCH(_hay);                                         \
+    if (opt_v) _found = !_found;                                         \
+    if (_found) {                                                        \
+        (mcnt)++;                                                        \
+        if (!opt_c) {                                                    \
+            if (opt_n) {                                                 \
+                char _pfx[32];                                           \
+                snprintf(_pfx, sizeof(_pfx), "%lld:", (long long)(lineno)); \
+                vel_val_cat_str(out, _pfx);                              \
+            }                                                            \
+            vel_val_cat_str(out, (raw));                                 \
+        }                                                                \
+    }                                                                    \
+} while(0)
+
+    vel_val_t out = val_make(NULL);
+
+    if (nfiles == 0) {
+        /* baca dari _pipe_in */
+        vel_val_t  pipe_in   = vel_var_get(vel, "_pipe_in");
+        const char *src      = (pipe_in && vel_str(pipe_in)[0])
+                               ? vel_str(pipe_in) : "";
+        const char *p        = src;
+        long long   lineno   = 0, mcnt = 0;
+        char        buf[4096];
+
         while (*p) {
-            const char *nl = strchr(p, '\n');
-            size_t len = nl ? (size_t)(nl - p) : strlen(p);
+            const char *nl  = strchr(p, '\n');
+            size_t      len = nl ? (size_t)(nl - p) : strlen(p);
             if (len >= sizeof(buf) - 1) len = sizeof(buf) - 2;
             memcpy(buf, p, len);
             buf[len] = '\n'; buf[len+1] = '\0';
             lineno++;
-            GREP_LINE(buf, lineno, match_count);
+            PROC_LINE(buf, lineno, mcnt);
             p = nl ? nl + 1 : p + len;
             if (!nl) break;
         }
         if (opt_c) {
-            char cnt[64];
-            snprintf(cnt, sizeof(cnt), "%lld\n", match_count);
+            char cnt[32]; snprintf(cnt, sizeof(cnt), "%lld\n", mcnt);
             vel_val_cat_str(out, cnt);
         }
         vel_val_free(pipe_in);
     } else {
-    for (i = argi; i < argc; i++) {
-        FILE  *f = fopen(vel_str(argv[i]), "r");
-        char   buf[4096];
-        long long lineno = 0, match_count = 0;
+        for (i = 0; i < nfiles; i++) {
+            const char *fname = vel_str(argv[file_idx[i]]);
+            FILE       *f     = fopen(fname, "r");
+            char        buf[4096];
+            long long   lineno = 0, mcnt = 0;
 
-        if (!f) {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "grep: %s: %s", vel_str(argv[i]), strerror(errno));
-            vel_error_set(vel, msg);
-            vel_val_free(out);
-            free(patlo);
-            return NULL;
-        }
-
-        while (fgets(buf, sizeof(buf), f)) {
-            lineno++;
-            char *haystack = buf;
-
-            if (opt_i) {
-                /* build lowercase copy of line (local, not static) */
-                char linelo[4096];
-                size_t k;
-                for (k = 0; buf[k] && k < sizeof(linelo) - 1; k++)
-                    linelo[k] = (char)tolower((unsigned char)buf[k]);
-                linelo[k] = '\0';
-                haystack = linelo;
+            if (!f) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "grep: %s: %s", fname, strerror(errno));
+                vel_error_set(vel, msg);
+                vel_val_free(out); free(pat_work); return NULL;
             }
-
-            int found = (strstr(haystack, patlo) != NULL);
-            if (opt_v) found = !found;
-
-            if (found) {
-                match_count++;
-                if (!opt_c) {
-                    char prefix[64] = {0};
-                    if (opt_n) snprintf(prefix, sizeof(prefix), "%lld:", lineno);
-                    vel_val_cat_str(out, prefix);
-                    vel_val_cat_str(out, buf);
-                }
+            while (fgets(buf, sizeof(buf), f)) {
+                lineno++;
+                PROC_LINE(buf, lineno, mcnt);
             }
-        }
-        fclose(f);
-
-        if (opt_c) {
-            char cnt[64];
-            snprintf(cnt, sizeof(cnt), "%lld\n", match_count);
-            vel_val_cat_str(out, cnt);
+            fclose(f);
+            if (opt_c) {
+                char cnt[32]; snprintf(cnt, sizeof(cnt), "%lld\n", mcnt);
+                vel_val_cat_str(out, cnt);
+            }
         }
     }
-    } /* end else (file args) */
-    #undef GREP_LINE
 
-    free(patlo);
-    vel_write(vel, vel_str(out));
-    vel_val_free(out);
-    return NULL;
+#undef DO_MATCH
+#undef PROC_LINE
+
+    free(pat_work);
+
+    /* ----------------------------------------------------------------
+     * BUG #2 FIX: return nilai (bukan NULL) agar [grep ...] bisa
+     * di-capture ke variabel.  Kode lama: vel_val_free(out); return NULL
+     * → $r selalu string kosong.
+     * ---------------------------------------------------------------- */
+    if (vel_str(out)[0]) vel_write(vel, vel_str(out));
+    return out;
 }
 
 /* ============================================================

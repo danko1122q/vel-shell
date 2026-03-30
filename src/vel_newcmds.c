@@ -179,20 +179,22 @@ static VELCB vel_val_t cmd_abs(vel_t vel, size_t argc, vel_val_t *argv)
 
 static VELCB vel_val_t cmd_max(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    double a, b;
+    double best; size_t i;
     (void)vel;
-    if (argc < 2) return argc ? vel_val_clone(argv[0]) : NULL;
-    a = vel_dbl(argv[0]); b = vel_dbl(argv[1]);
-    return smart_num(a > b ? a : b);
+    if (!argc) return NULL;
+    best = vel_dbl(argv[0]);
+    for (i = 1; i < argc; i++) { double v = vel_dbl(argv[i]); if (v > best) best = v; }
+    return smart_num(best);
 }
 
 static VELCB vel_val_t cmd_min(vel_t vel, size_t argc, vel_val_t *argv)
 {
-    double a, b;
+    double best; size_t i;
     (void)vel;
-    if (argc < 2) return argc ? vel_val_clone(argv[0]) : NULL;
-    a = vel_dbl(argv[0]); b = vel_dbl(argv[1]);
-    return smart_num(a < b ? a : b);
+    if (!argc) return NULL;
+    best = vel_dbl(argv[0]);
+    for (i = 1; i < argc; i++) { double v = vel_dbl(argv[i]); if (v < best) best = v; }
+    return smart_num(best);
 }
 
 static VELCB vel_val_t cmd_math(vel_t vel, size_t argc, vel_val_t *argv)
@@ -278,6 +280,138 @@ static VELCB vel_val_t cmd_string(vel_t vel, size_t argc, vel_val_t *argv)
     if (!argc) { vel_error_set(vel, "string: subcommand required"); return NULL; }
     op = vel_str(argv[0]);
 
+    /* ---- length ---- */
+    if (!strcmp(op, "length")) {
+        if (argc < 2) return vel_val_int(0);
+        return vel_val_int((vel_int_t)strlen(vel_str(argv[1])));
+    }
+
+    /* ---- toupper ---- */
+    if (!strcmp(op, "toupper")) {
+        const char *s; size_t i; vel_val_t r;
+        if (argc < 2) return val_make(NULL);
+        s = vel_str(argv[1]); r = val_make(NULL);
+        for (i = 0; s[i]; i++) vel_val_cat_ch(r, (char)toupper((unsigned char)s[i]));
+        return r;
+    }
+
+    /* ---- tolower ---- */
+    if (!strcmp(op, "tolower")) {
+        const char *s; size_t i; vel_val_t r;
+        if (argc < 2) return val_make(NULL);
+        s = vel_str(argv[1]); r = val_make(NULL);
+        for (i = 0; s[i]; i++) vel_val_cat_ch(r, (char)tolower((unsigned char)s[i]));
+        return r;
+    }
+
+    /* ---- index str idx ---- */
+    if (!strcmp(op, "index")) {
+        const char *s; size_t idx; char buf[2];
+        if (argc < 3) return val_make(NULL);
+        s = vel_str(argv[1]); idx = (size_t)vel_int(argv[2]);
+        if (idx >= strlen(s)) return val_make(NULL);
+        buf[0] = s[idx]; buf[1] = '\0';
+        return vel_val_str(buf);
+    }
+
+    /* ---- range str first last ---- (inclusive both ends) */
+    if (!strcmp(op, "range")) {
+        const char *s; size_t slen, first, last;
+        if (argc < 4) return val_make(NULL);
+        s = vel_str(argv[1]); slen = strlen(s);
+        first = (size_t)vel_int(argv[2]);
+        last  = (size_t)vel_int(argv[3]);
+        if (first >= slen) return val_make(NULL);
+        if (last  >= slen) last = slen - 1;
+        if (last  < first) return val_make(NULL);
+        return val_make_len(s + first, last - first + 1);
+    }
+
+    /* ---- first needle haystack ?startidx? ---- */
+    if (!strcmp(op, "first")) {
+        const char *needle, *hay, *found; size_t offset = 0;
+        if (argc < 3) return vel_val_int(-1);
+        needle = vel_str(argv[1]); hay = vel_str(argv[2]);
+        if (!needle[0]) return vel_val_int(0);
+        if (argc >= 4) {
+            offset = (size_t)vel_int(argv[3]);
+            if (offset >= strlen(hay)) return vel_val_int(-1);
+        }
+        found = strstr(hay + offset, needle);
+        return found ? vel_val_int((vel_int_t)(found - hay)) : vel_val_int(-1);
+    }
+
+    /* ---- last needle haystack ---- */
+    if (!strcmp(op, "last")) {
+        const char *needle, *hay, *p; vel_int_t pos = -1;
+        if (argc < 3) return vel_val_int(-1);
+        needle = vel_str(argv[1]); hay = vel_str(argv[2]);
+        if (!needle[0]) return vel_val_int((vel_int_t)strlen(hay));
+        p = hay;
+        while ((p = strstr(p, needle)) != NULL) { pos = (vel_int_t)(p - hay); p++; }
+        return vel_val_int(pos);
+    }
+
+    /* ---- replace str first last ?newstr? ---- */
+    if (!strcmp(op, "replace")) {
+        const char *s, *rep; size_t slen, first, last; vel_val_t r;
+        if (argc < 4) return argc > 1 ? vel_val_clone(argv[1]) : val_make(NULL);
+        s     = vel_str(argv[1]); slen = strlen(s);
+        first = (size_t)vel_int(argv[2]);
+        last  = (size_t)vel_int(argv[3]);
+        rep   = (argc >= 5) ? vel_str(argv[4]) : "";
+        if (first > slen) first = slen;
+        if (last  >= slen) last = slen - 1;
+        r = val_make(NULL);
+        vel_val_cat_str_len(r, s, first);
+        vel_val_cat_str(r, rep);
+        if (last + 1 < slen) vel_val_cat_str(r, s + last + 1);
+        return r;
+    }
+
+    /* ---- trim str ?chars? ---- */
+    if (!strcmp(op, "trim")) {
+        const char *s, *chars; size_t start, end;
+        if (argc < 2) return val_make(NULL);
+        s = vel_str(argv[1]); chars = (argc >= 3) ? vel_str(argv[2]) : " \f\n\r\t\v";
+        start = 0; end = strlen(s);
+        while (start < end && strchr(chars, s[start])) start++;
+        while (end > start && strchr(chars, s[end - 1])) end--;
+        return val_make_len(s + start, end - start);
+    }
+
+    /* ---- trimleft str ?chars? ---- */
+    if (!strcmp(op, "trimleft")) {
+        const char *s, *chars; size_t start;
+        if (argc < 2) return val_make(NULL);
+        s = vel_str(argv[1]); chars = (argc >= 3) ? vel_str(argv[2]) : " \f\n\r\t\v";
+        start = 0;
+        while (s[start] && strchr(chars, s[start])) start++;
+        return vel_val_str(s + start);
+    }
+
+    /* ---- trimright str ?chars? ---- */
+    if (!strcmp(op, "trimright")) {
+        const char *s, *chars; size_t end;
+        if (argc < 2) return val_make(NULL);
+        s = vel_str(argv[1]); chars = (argc >= 3) ? vel_str(argv[2]) : " \f\n\r\t\v";
+        end = strlen(s);
+        while (end > 0 && strchr(chars, s[end - 1])) end--;
+        return val_make_len(s, end);
+    }
+
+    /* ---- compare str1 str2 ---- */
+    if (!strcmp(op, "compare")) {
+        if (argc < 3) return NULL;
+        return vel_val_int((vel_int_t)strcmp(vel_str(argv[1]), vel_str(argv[2])));
+    }
+
+    /* ---- equal str1 str2 ---- */
+    if (!strcmp(op, "equal")) {
+        if (argc < 3) return NULL;
+        return vel_val_int(strcmp(vel_str(argv[1]), vel_str(argv[2])) == 0 ? 1 : 0);
+    }
+
     /* ---- repeat ---- */
     if (!strcmp(op, "repeat")) {
         const char *s; size_t slen, n, i; vel_val_t r;
@@ -303,7 +437,7 @@ static VELCB vel_val_t cmd_string(vel_t vel, size_t argc, vel_val_t *argv)
         const char *type, *s; size_t i, len; int ok = 1;
         if (argc < 3) return NULL;
         type = vel_str(argv[1]); s = vel_str(argv[2]); len = strlen(s);
-        if (!len) return NULL;
+        if (!len) return vel_val_int(0);
 
         if      (!strcmp(type, "integer")) ok = str_is_integer(s);
         else if (!strcmp(type, "double"))  ok = str_is_double(s);
@@ -318,7 +452,7 @@ static VELCB vel_val_t cmd_string(vel_t vel, size_t argc, vel_val_t *argv)
             char msg[80]; snprintf(msg, sizeof(msg), "string is: unknown type '%s'", type);
             vel_error_set(vel, msg); return NULL;
         }
-        return ok ? vel_val_int(1) : NULL;
+        return vel_val_int(ok ? 1 : 0);
     }
 
     /* ---- map ---- */
@@ -359,6 +493,7 @@ static VELCB vel_val_t cmd_string(vel_t vel, size_t argc, vel_val_t *argv)
         vel_error_set(vel, msg); return NULL;
     }
 }
+
 
 /* ============================================================
  * High-precision clock

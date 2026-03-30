@@ -1,0 +1,594 @@
+# ============================================================
+# TEST KOMPREHENSIF VEL - semua fitur utama
+# ============================================================
+
+set global PASS 0
+set global FAIL 0
+
+func ok {label} {
+    set global PASS [expr $PASS + 1]
+    print "  \[PASS\] $label"
+}
+
+func fail {label msg} {
+    set global FAIL [expr $FAIL + 1]
+    print "  \[FAIL\] $label : $msg"
+}
+
+func section {name} {
+    print ""
+    print "=== $name ==="
+}
+
+# ============================================================
+section "1. VARIABEL & SET"
+# ============================================================
+
+set x 42
+if {$x == 42} { ok "set dan baca variabel integer" } else { fail "set variabel" "x != 42" }
+
+set s "hello world"
+if {$s == "hello world"} { ok "set string dengan spasi" } else { fail "set string" "mismatch" }
+
+set a 1; set b 2
+if {$a == 1 && $b == 2} { ok "multiple set satu baris" } else { fail "multi set" "" }
+
+# ============================================================
+section "2. EXPR - ARITMATIKA & LOGIKA"
+# ============================================================
+
+set r [expr 3 + 4 * 2]
+if {$r == 11} { ok "expr operator precedence (3+4*2=11)" } else { fail "expr precedence" "got $r" }
+
+set r [expr (3 + 4) * 2]
+if {$r == 14} { ok "expr kurung (3+4)*2=14" } else { fail "expr kurung" "got $r" }
+
+set r [expr 10 % 3]
+if {$r == 1} { ok "expr modulo 10%3=1" } else { fail "expr modulo" "got $r" }
+
+set r [expr 2 ** 8]
+if {$r == 256} { ok "expr power 2**8=256" } else { fail "expr power" "got $r" }
+
+set r [expr 10 > 5 && 3 < 7]
+if {$r == 1} { ok "expr logika &&" } else { fail "expr &&" "got $r" }
+
+set r [expr 1 == 1]
+if {$r == 1} { ok "expr == true" } else { fail "expr ==" "got $r" }
+
+set r [expr 5 != 3]
+if {$r == 1} { ok "expr != true" } else { fail "expr !=" "got $r" }
+
+set r [expr !0]
+if {$r == 1} { ok "expr !0 = 1" } else { fail "expr not" "got $r" }
+
+# ============================================================
+section "3. IF / ELSEIF / ELSE"
+# ============================================================
+
+set n 5
+if {$n > 10} {
+    fail "if/else" "masuk cabang salah"
+} elseif {$n == 5} {
+    ok "elseif cocok"
+} else {
+    fail "if/else" "else tidak seharusnya"
+}
+
+if {1} { ok "if {1} selalu true" } else { fail "if 1" "" }
+if {0} { fail "if 0" "harusnya skip" } else { ok "if {0} masuk else" }
+
+# ============================================================
+section "4. WHILE"
+# ============================================================
+
+set i 0
+set sum 0
+while {$i < 5} {
+    set sum [expr $sum + $i]
+    set i [expr $i + 1]
+}
+if {$sum == 10} { ok "while loop sum 0..4 = 10" } else { fail "while sum" "got $sum" }
+
+set j 0
+while {$j < 3} {
+    incr j
+}
+if {$j == 3} { ok "while dengan incr" } else { fail "while incr" "got $j" }
+
+# ============================================================
+section "5. FOR / FOREACH"
+# ============================================================
+
+set total 0
+for item {10 20 30} {
+    set total [expr $total + $item]
+}
+if {$total == 60} { ok "for item dalam list" } else { fail "for list" "got $total" }
+
+set total 0
+foreach {aa bb} {1 2 3 4 5 6} {
+    set total [expr $total + $aa + $bb]
+}
+if {$total == 21} { ok "foreach pasangan" } else { fail "foreach" "got $total" }
+
+# ============================================================
+section "6. BREAK & CONTINUE"
+# ============================================================
+
+set found 0
+for item {1 2 3 4 5} {
+    if {$item == 3} { set found $item; break }
+}
+if {$found == 3} { ok "break menghentikan for" } else { fail "break" "got $found" }
+
+set count_cont 0
+for item {1 2 3 4 5} {
+    if {$item == 3} { continue }
+    set count_cont [expr $count_cont + 1]
+}
+if {$count_cont == 4} { ok "continue skip 1 iterasi" } else { fail "continue" "got $count_cont" }
+
+# ============================================================
+section "7. FUNGSI & REKURSI"
+# ============================================================
+
+func add {a b} {
+    return [expr $a + $b]
+}
+set r [add 3 7]
+if {$r == 10} { ok "func dan return" } else { fail "func return" "got $r" }
+
+func factorial {n} {
+    if {$n <= 1} { return 1 }
+    return [expr $n * [factorial [expr $n - 1]]]
+}
+set r [factorial 6]
+if {$r == 720} { ok "rekursi factorial(6)=720" } else { fail "rekursi" "got $r" }
+
+func double {n} { return [expr $n * 2] }
+func quadruple {n} { return [double [double $n]] }
+set r [quadruple 5]
+if {$r == 20} { ok "chained func call quadruple(5)=20" } else { fail "chained" "got $r" }
+
+set global counter_g 0
+func inc_global {} {
+    set global counter_g [expr $counter_g + 1]
+}
+inc_global; inc_global; inc_global
+if {$counter_g == 3} { ok "set global di dalam func" } else { fail "set global" "got $counter_g" }
+
+# ============================================================
+section "8. STRING"
+# ============================================================
+
+set s "Hello, World!"
+set r [string length $s]
+if {$r == 13} { ok "string length" } else { fail "string length" "got $r" }
+
+set r [string toupper "hello"]
+if {$r == "HELLO"} { ok "string toupper" } else { fail "toupper" "got $r" }
+
+set r [string tolower "WORLD"]
+if {$r == "world"} { ok "string tolower" } else { fail "tolower" "got $r" }
+
+set r [string index "abcde" 2]
+if {$r == "c"} { ok "string index" } else { fail "string index" "got $r" }
+
+set r [string range "abcdefgh" 2 5]
+if {$r == "cdef"} { ok "string range" } else { fail "string range" "got $r" }
+
+set r [string first "lo" "hello world"]
+if {$r == 3} { ok "string first" } else { fail "string first" "got $r" }
+
+set r [string replace "hello" 1 3 "ELL"]
+if {$r == "hELLo"} { ok "string replace" } else { fail "string replace" "got $r" }
+
+set r [string repeat "ab" 3]
+if {$r == "ababab"} { ok "string repeat" } else { fail "string repeat" "got $r" }
+
+set r [string reverse "abcd"]
+if {$r == "dcba"} { ok "string reverse" } else { fail "string reverse" "got $r" }
+
+set r [string trim "  hello  "]
+if {$r == "hello"} { ok "string trim" } else { fail "string trim" "got $r" }
+
+set r [string trimleft "  hello"]
+if {$r == "hello"} { ok "string trimleft" } else { fail "string trimleft" "got $r" }
+
+set r [string trimright "hello  "]
+if {$r == "hello"} { ok "string trimright" } else { fail "string trimright" "got $r" }
+
+set r [string is integer "123"]
+if {$r == 1} { ok "string is integer true" } else { fail "string is integer" "got $r" }
+
+set r [string is integer "abc"]
+if {$r == 0} { ok "string is integer false" } else { fail "string is integer false" "got $r" }
+
+set r [string is alpha "hello"]
+if {$r == 1} { ok "string is alpha true" } else { fail "string is alpha" "got $r" }
+
+set r [string map {a A e E} "apple"]
+if {$r == "ApplE"} { ok "string map" } else { fail "string map" "got $r" }
+
+# ============================================================
+section "9. LIST"
+# ============================================================
+
+set lst {a b c d e}
+set r [llength $lst]
+if {$r == 5} { ok "llength" } else { fail "llength" "got $r" }
+
+set r [lindex $lst 2]
+if {$r == "c"} { ok "lindex" } else { fail "lindex" "got $r" }
+
+set r [lrange $lst 1 3]
+if {$r == "b c d"} { ok "lrange" } else { fail "lrange" "got $r" }
+
+set lst2 [lappend $lst "f"]
+if {[llength $lst2] == 6} { ok "lappend" } else { fail "lappend" "got len [llength $lst2]" }
+
+set r [lsort {banana apple cherry}]
+if {$r == "apple banana cherry"} { ok "lsort" } else { fail "lsort" "got $r" }
+
+set r [lreverse {1 2 3 4}]
+if {$r == "4 3 2 1"} { ok "lreverse" } else { fail "lreverse" "got $r" }
+
+set r [luniq {a b a c b d}]
+if {$r == "a b c d"} { ok "luniq" } else { fail "luniq" "got $r" }
+
+lassign {10 20 30} lx ly lz
+if {$lx == 10 && $ly == 20 && $lz == 30} { ok "lassign" } else { fail "lassign" "lx=$lx ly=$ly lz=$lz" }
+
+set r [lsearch {1 2 3 4 5} 3]
+if {$r == 2} { ok "lsearch" } else { fail "lsearch" "got $r" }
+
+set r [join {a b c} "-"]
+if {$r == "a-b-c"} { ok "join dengan separator" } else { fail "join" "got $r" }
+
+set r [split "a,b,c" ","]
+if {[llength $r] == 3} { ok "split" } else { fail "split" "len=[llength $r]" }
+
+set r [linsert {a b c} 1 "X" "Y"]
+if {[lindex $r 1] == "X"} { ok "linsert" } else { fail "linsert" "got $r" }
+
+set r [lreplace {a b c d} 1 2 "X"]
+if {$r == "a X d"} { ok "lreplace" } else { fail "lreplace" "got $r" }
+
+# ============================================================
+section "10. INCR / DECR"
+# ============================================================
+
+set n 5
+incr n
+if {$n == 6} { ok "incr +1" } else { fail "incr" "got $n" }
+
+incr n 4
+if {$n == 10} { ok "incr dengan step +4" } else { fail "incr step" "got $n" }
+
+decr n
+if {$n == 9} { ok "decr -1" } else { fail "decr" "got $n" }
+
+decr n 3
+if {$n == 6} { ok "decr dengan step -3" } else { fail "decr step" "got $n" }
+
+# ============================================================
+section "11. APPEND STRING"
+# ============================================================
+
+set s "hello"
+append s " world"
+if {$s == "hello world"} { ok "append string" } else { fail "append" "got '$s'" }
+
+set s ""
+append s "a"
+append s "b"
+append s "c"
+if {$s == "abc"} { ok "append multiple" } else { fail "append multi" "got '$s'" }
+
+# ============================================================
+section "12. FORMAT & SCAN"
+# ============================================================
+
+set r [format "val: %d, float: %.2f, str: %s" 42 3.14159 "vel"]
+if {[string first "val: 42" $r] >= 0 && [string first "3.14" $r] >= 0} {
+    ok "format %d %.2f %s"
+} else {
+    fail "format" "got '$r'"
+}
+
+scan "42 3.14 hello" "%d %f %s" sv_int sv_float sv_str
+if {$sv_int == 42} { ok "scan %d" } else { fail "scan int" "got '$sv_int'" }
+if {$sv_str == "hello"} { ok "scan %s" } else { fail "scan str" "got '$sv_str'" }
+
+# ============================================================
+section "13. MATH"
+# ============================================================
+
+set r [abs -42]
+if {$r == 42} { ok "abs -42 = 42" } else { fail "abs" "got $r" }
+
+set r [max 3 7 1 9 2]
+if {$r == 9} { ok "max" } else { fail "max" "got $r" }
+
+set r [min 3 7 1 9 2]
+if {$r == 1} { ok "min" } else { fail "min" "got $r" }
+
+set r [math sqrt 144]
+print "  math sqrt 144 = $r"
+ok "math sqrt"
+
+set r [math floor 3.7]
+print "  math floor 3.7 = $r"
+ok "math floor"
+
+set r [math ceil 3.2]
+print "  math ceil 3.2 = $r"
+ok "math ceil"
+
+set r [math pow 2 10]
+print "  math pow 2 10 = $r"
+ok "math pow"
+
+set r [math sin 0]
+print "  math sin 0 = $r"
+ok "math sin"
+
+set r [math log 1]
+print "  math log 1 = $r"
+ok "math log"
+
+set r [math pi]
+print "  math pi = $r"
+ok "math pi"
+
+# ============================================================
+section "14. DICT"
+# ============================================================
+
+set d {}
+dict set d name "vel"
+dict set d version "1.0"
+dict set d author "community"
+
+set r [dict get $d name]
+if {$r == "vel"} { ok "dict set/get" } else { fail "dict get" "got $r" }
+
+set r [dict exists $d version]
+if {$r == 1} { ok "dict exists - ada" } else { fail "dict exists" "got $r" }
+
+set r [dict exists $d missing]
+if {$r == 0} { ok "dict exists - tidak ada" } else { fail "dict not exists" "got $r" }
+
+set r [dict size $d]
+if {$r == 3} { ok "dict size = 3" } else { fail "dict size" "got $r" }
+
+set r [dict keys $d]
+print "  dict keys: $r"
+if {[llength $r] == 3} { ok "dict keys" } else { fail "dict keys" "got $r" }
+
+dict unset d author
+set r [dict size $d]
+if {$r == 2} { ok "dict unset" } else { fail "dict unset" "got $r" }
+
+set cnt 0
+dict for {k v} $d {
+    set cnt [expr $cnt + 1]
+}
+if {$cnt == 2} { ok "dict for iteration" } else { fail "dict for" "got $cnt" }
+
+# ============================================================
+section "15. BASE64"
+# ============================================================
+
+set enc [base64 encode "hello world"]
+set dec [base64 decode $enc]
+if {$dec == "hello world"} { ok "base64 encode/decode roundtrip" } else { fail "base64" "got '$dec'" }
+
+set enc2 [base64 encode "Vel scripting language!"]
+set dec2 [base64 decode $enc2]
+if {$dec2 == "Vel scripting language!"} { ok "base64 string lengkap" } else { fail "base64 panjang" "got '$dec2'" }
+
+# ============================================================
+section "16. TRY / CATCH / FINALLY"
+# ============================================================
+
+set caught 0
+try {
+    error "test error"
+} e {
+    set caught 1
+}
+if {$caught == 1} { ok "try/catch error" } else { fail "try/catch" "" }
+
+set fin 0
+try {
+    set xx 999
+} finally {
+    set fin 1
+}
+if {$fin == 1} { ok "try/finally dijalankan" } else { fail "try/finally" "" }
+
+set caught2 0
+set fin2 0
+try {
+    error "lagi error"
+} e {
+    set caught2 1
+} finally {
+    set fin2 1
+}
+if {$caught2 == 1 && $fin2 == 1} { ok "try/catch+finally keduanya" } else { fail "try/catch+finally" "c=$caught2 f=$fin2" }
+
+set val_after 0
+try {
+    set val_after 1
+    error "gagal"
+    set val_after 2
+} e {
+    set caught 1
+}
+if {$val_after == 1} { ok "try: eksekusi berhenti saat error" } else { fail "try flow" "val=$val_after" }
+
+# ============================================================
+section "17. UPVAR"
+# ============================================================
+
+func do_modify {} {
+    upvar localref outerval
+    set localref "modified_by_upvar"
+}
+set outerval "original"
+do_modify
+if {$outerval == "modified_by_upvar"} { ok "upvar memodifikasi variabel caller" } else { fail "upvar" "got '$outerval'" }
+
+# ============================================================
+section "18. REFLECT"
+# ============================================================
+
+set r [reflect version]
+print "  reflect version: $r"
+ok "reflect version"
+
+set r [reflect depth]
+if {$r >= 0} { ok "reflect depth >= 0" } else { fail "reflect depth" "got $r" }
+
+set r [reflect has-func "add"]
+if {$r == 1} { ok "reflect has-func (add ada)" } else { fail "reflect has-func" "got $r" }
+
+set r [reflect has-func "fungsi_tidak_ada_xyzzy"]
+if {$r == 0} { ok "reflect has-func (tidak ada)" } else { fail "reflect has-func not" "got $r" }
+
+set r [reflect has-var "outerval"]
+if {$r == 1} { ok "reflect has-var" } else { fail "reflect has-var" "got $r" }
+
+set r [reflect args "add"]
+if {[llength $r] == 2} { ok "reflect args (add punya 2 param)" } else { fail "reflect args" "got '$r'" }
+
+set r [reflect body "factorial"]
+if {[string length $r] > 0} { ok "reflect body fungsi ada" } else { fail "reflect body" "kosong" }
+
+# ============================================================
+section "19. CLOCK"
+# ============================================================
+
+set t1 [clock ms]
+set t2 [clock ms]
+if {$t2 >= $t1} { ok "clock ms monotonic" } else { fail "clock ms" "t2 < t1" }
+
+set t [clock s]
+if {$t > 1000000000} { ok "clock s (unix timestamp valid)" } else { fail "clock s" "got $t" }
+
+set t [clock us]
+if {$t > 0} { ok "clock us" } else { fail "clock us" "got $t" }
+
+set t [clock ns]
+if {$t > 0} { ok "clock ns" } else { fail "clock ns" "got $t" }
+
+# ============================================================
+section "20. EVAL"
+# ============================================================
+
+set code "expr 6 * 7"
+set r [eval $code]
+if {$r == 42} { ok "eval string sebagai kode" } else { fail "eval" "got $r" }
+
+set r [topeval {set top_result "dari_topeval"}]
+if {$top_result == "dari_topeval"} { ok "topeval di global scope" } else { fail "topeval" "got '$top_result'" }
+
+# ============================================================
+section "21. FILESYSTEM (cd, pwd, mkdir)"
+# ============================================================
+
+set origdir [pwd]
+print "  pwd asal: $origdir"
+ok "pwd tidak crash"
+
+mkdir /tmp/vel_test_dir
+cd /tmp/vel_test_dir
+set cur [pwd]
+if {$cur == "/tmp/vel_test_dir"} { ok "mkdir + cd + pwd" } else { fail "cd/pwd" "got $cur" }
+
+cd $origdir
+set cur [pwd]
+if {$cur == $origdir} { ok "cd kembali ke dir asal" } else { fail "cd kembali" "got $cur" }
+
+# ============================================================
+section "22. FILE I/O"
+# ============================================================
+
+set tmpfile "/tmp/vel_test_file.txt"
+writefile $tmpfile "baris satu\nbaris dua\nbaris tiga\n"
+set isi [readfile $tmpfile]
+if {[string first "baris satu" $isi] >= 0} { ok "writefile + readfile" } else { fail "file io" "konten salah" }
+
+set r [file exists $tmpfile]
+if {$r == 1} { ok "file exists - ada" } else { fail "file exists" "got $r" }
+
+set r [file size $tmpfile]
+if {$r > 0} { ok "file size > 0 (got $r bytes)" } else { fail "file size" "got $r" }
+
+set r [file isfile $tmpfile]
+if {$r == 1} { ok "file isfile" } else { fail "file isfile" "got $r" }
+
+set r [file isdir /tmp]
+if {$r == 1} { ok "file isdir /tmp" } else { fail "file isdir" "got $r" }
+
+set r [file extension "test.vel"]
+if {$r == ".vel"} { ok "file extension" } else { fail "file extension" "got '$r'" }
+
+set r [file tail "/tmp/vel_test_file.txt"]
+if {$r == "vel_test_file.txt"} { ok "file tail" } else { fail "file tail" "got '$r'" }
+
+set r [file dir "/tmp/vel_test_file.txt"]
+if {$r == "/tmp"} { ok "file dir" } else { fail "file dir" "got '$r'" }
+
+# ============================================================
+section "23. GREP (built-in)"
+# ============================================================
+
+set tmpgrep "/tmp/vel_test_grep.txt"
+writefile $tmpgrep "apel\njeruk\naprikot\npisang\napel merah\n"
+set r [grep "apel" $tmpgrep]
+if {[string first "apel" $r] >= 0} { ok "grep pattern dasar" } else { fail "grep" "got '$r'" }
+
+set r [grep "^jeruk" $tmpgrep]
+if {[string first "jeruk" $r] >= 0} { ok "grep anchor ^" } else { fail "grep anchor" "got '$r'" }
+
+set r [grep "APEL" -i $tmpgrep]
+if {[string first "apel" $r] >= 0} { ok "grep case insensitive -i" } else { fail "grep -i" "got '$r'" }
+
+# ============================================================
+section "24. PIPE & PROGRAM EKSTERNAL"
+# ============================================================
+
+set r [pipe echo "hello from pipe"]
+if {[string first "hello" $r] >= 0} { ok "pipe echo" } else { fail "pipe echo" "got '$r'" }
+
+set r [pipe ls /tmp]
+if {[string length $r] > 0} { ok "pipe ls /tmp" } else { fail "pipe ls" "kosong" }
+
+set r [pipe printf "%s\n" "vel test"]
+if {[string first "vel test" $r] >= 0} { ok "pipe printf" } else { fail "pipe printf" "got '$r'" }
+
+set r [pipe cat $tmpfile]
+if {[string first "baris satu" $r] >= 0} { ok "pipe cat" } else { fail "pipe cat" "got '$r'" }
+
+# ============================================================
+# RINGKASAN AKHIR
+# ============================================================
+
+print ""
+print "======================================"
+print "            HASIL TEST VEL"
+print "======================================"
+print "  PASS  : $PASS"
+print "  FAIL  : $FAIL"
+set total [expr $PASS + $FAIL]
+print "  TOTAL : $total"
+print ""
+if {$FAIL == 0} {
+    print "  STATUS : SEMUA TEST LULUS!"
+} else {
+    print "  STATUS : ADA $FAIL KEGAGALAN DARI $total TEST"
+}
+print "======================================"

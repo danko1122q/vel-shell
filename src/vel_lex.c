@@ -446,8 +446,13 @@ vel_list_t lex_tokenize(vel_t vel)
      *
      * Pipe sugar diproses SEBELUM redirect sugar agar redirect
      * di dalam pipe segment tetap bisa dideteksi.
+     *
+     * BUG FIX: skip_redir is set by vel_eval_expr so that '|', '>', '<'
+     * are treated as plain tokens (comparison/logical operators in
+     * arithmetic expressions), not as shell pipe/redirect operators.
      * ---------------------------------------------------------------- */
 #ifndef WIN32
+    if (!vel->skip_redir)
     {
         size_t i;
         int has_pipe = 0;
@@ -497,6 +502,7 @@ vel_list_t lex_tokenize(vel_t vel)
      *   - both stdout+stderr ->  redirect2 {cmd} out mode err
      * ---------------------------------------------------------------- */
 #ifndef WIN32
+    if (!vel->skip_redir)
     {
         size_t i, k;
         size_t stdout_idx = (size_t)-1;

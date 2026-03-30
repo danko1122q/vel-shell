@@ -359,6 +359,37 @@ static VELCB vel_val_t cmd_pipe(vel_t vel, size_t argc, vel_val_t *argv)
 #else
     if (!argc) return NULL;
 
+    /*
+     * Heuristic: if the FIRST argv has no spaces (bare command name),
+     * treat all argv as one command + its arguments (exec-style).
+     *   pipe echo "hello world"   -> exec ["echo","hello world"]
+     *   pipe {echo hello} {cat}   -> echo hello | cat  (pipeline)
+     */
+    int first_is_bare = (strchr(vel_str(argv[0]), ' ') == NULL &&
+                         strchr(vel_str(argv[0]), '\t') == NULL);
+
+    if (first_is_bare && argc >= 1) {
+        /* exec-style: run all args as one command */
+        size_t k;
+        const char **av = malloc(sizeof(char *) * (argc + 1));
+        for (k = 0; k < argc; k++) av[k] = vel_str(argv[k]);
+        av[argc] = NULL;
+        char *out_buf = NULL; size_t out_len = 0;
+        int status = run_cmd_fds(av, -1, -1, &out_buf, &out_len, 1);
+        free(av);
+        g_last_exit = status;
+        update_exit_var(vel, status);
+        if (out_buf) {
+            while (out_len > 0 && (out_buf[out_len-1]=='\n'||out_buf[out_len-1]=='\r'))
+                out_buf[--out_len] = '\0';
+            vel_val_t r = val_make_len(out_buf, out_len);
+            free(out_buf);
+            return r;
+        }
+        return val_make(NULL);
+    }
+
+    /* Pipeline mode: each argv is a stage */
     char  *prev_buf = NULL;
     size_t prev_len = 0;
     size_t i;
@@ -383,12 +414,10 @@ static VELCB vel_val_t cmd_pipe(vel_t vel, size_t argc, vel_val_t *argv)
         int    status  = 0;
 
         if (is_builtin) {
-            /* Jalankan builtin vel, capture output via write callback */
             pipe_cap_t   cap      = { NULL, 0 };
             void        *old_data = vel_get_data(vel);
             vel_cb_t     old_cb   = vel->cb[VEL_CB_WRITE];
 
-            /* inject stdin dari segment sebelumnya sebagai var _pipe_in */
             if (prev_buf) {
                 vel_val_t pv = vel_val_str(prev_buf);
                 vel_var_set(vel, "_pipe_in", pv, VEL_VAR_GLOBAL);
@@ -402,7 +431,6 @@ static VELCB vel_val_t cmd_pipe(vel_t vel, size_t argc, vel_val_t *argv)
             vel_val_t r    = vel_parse_val(vel, code, 0);
             vel_val_free(code);
 
-            /* builtin yang return value (bukan via vel_write) */
             if (r && vel_str(r)[0]) {
                 const char *rs = vel_str(r);
                 size_t rlen = strlen(rs);
@@ -420,14 +448,12 @@ static VELCB vel_val_t cmd_pipe(vel_t vel, size_t argc, vel_val_t *argv)
             out_len = cap.len;
             status  = 0;
         } else {
-            /* External command — feed prev_buf via pipe jika ada */
             const char **av = malloc(sizeof(char *) * (wc + 1));
             size_t j;
             for (j = 0; j < wc; j++) av[j] = vel_str(vel_list_get(words, j));
             av[wc] = NULL;
 
             if (prev_buf && prev_len > 0) {
-                /* feed prev_buf ke stdin child via pipe */
                 int in_pfd[2], out_pfd[2] = {-1,-1};
                 pipe(in_pfd);
                 if (!is_last) pipe(out_pfd);
@@ -463,22 +489,7 @@ static VELCB vel_val_t cmd_pipe(vel_t vel, size_t argc, vel_val_t *argv)
                 if (pid > 0) waitpid(pid, &st, 0);
                 status = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
             } else {
-                if (is_last)
-                    status = run_cmd_fds(av, -1, -1, &out_buf, &out_len, 1);
-                else {
-                    /* buat pipe untuk output ke segment berikutnya */
-                    int pfd[2];
-                    pipe(pfd);
-                    status = run_cmd_fds(av, -1, pfd[1], NULL, NULL, 0);
-                    /* baca output untuk dijadikan prev_buf */
-                    char rbuf[4096]; ssize_t n;
-                    while ((n = read(pfd[0], rbuf, sizeof(rbuf))) > 0) {
-                        out_buf = realloc(out_buf, out_len + (size_t)n);
-                        memcpy(out_buf + out_len, rbuf, (size_t)n);
-                        out_len += (size_t)n;
-                    }
-                    close(pfd[0]);
-                }
+                status = run_cmd_fds(av, -1, -1, &out_buf, &out_len, 1);
             }
             free(av);
         }
@@ -494,17 +505,15 @@ static VELCB vel_val_t cmd_pipe(vel_t vel, size_t argc, vel_val_t *argv)
 
     vel_val_t result = NULL;
     if (prev_buf) {
-        /* strip trailing newlines */
         while (prev_len > 0 &&
                (prev_buf[prev_len-1] == '\n' || prev_buf[prev_len-1] == '\r'))
             prev_buf[--prev_len] = '\0';
         if (prev_len > 0) {
-            /* tulis ke output agar tampil / bisa di-redirect */
             prev_buf[prev_len] = '\n';
             prev_buf = realloc(prev_buf, prev_len + 2);
             prev_buf[prev_len + 1] = '\0';
             vel_write(vel, prev_buf);
-            prev_buf[prev_len] = '\0'; /* restore untuk return value */
+            prev_buf[prev_len] = '\0';
         }
         result = val_make_len(prev_buf, prev_len);
         free(prev_buf);
@@ -1371,16 +1380,145 @@ static VELCB vel_val_t cmd_date(vel_t vel, size_t argc, vel_val_t *argv)
     return vel_val_str(buf);
 }
 
-/* ============================================================ Registration */
+/* ============================================================
+ * writefile / readfile — Tcl-style convenience I/O
+ * ========================================================= */
+static VELCB vel_val_t cmd_writefile(vel_t vel, size_t argc, vel_val_t *argv)
+{
+    const char *path, *data; FILE *f; size_t dlen;
+    if (argc < 2) { vel_error_set(vel, "writefile: path data"); return NULL; }
+    path = vel_str(argv[0]); data = vel_str(argv[1]); dlen = strlen(data);
+    f = fopen(path, "wb");
+    if (!f) { char msg[256]; snprintf(msg,sizeof(msg),"writefile: cannot open '%s': %s",path,strerror(errno)); vel_error_set(vel,msg); return NULL; }
+    if (dlen && fwrite(data,1,dlen,f)!=dlen) { char msg[256]; snprintf(msg,sizeof(msg),"writefile: write error '%s': %s",path,strerror(errno)); fclose(f); vel_error_set(vel,msg); return NULL; }
+    fclose(f);
+    return vel_val_clone(argv[1]);
+}
+
+static VELCB vel_val_t cmd_readfile(vel_t vel, size_t argc, vel_val_t *argv)
+{
+    FILE *f; long sz_raw; size_t sz; char *buf; vel_val_t r;
+    if (!argc) { vel_error_set(vel,"readfile: path required"); return NULL; }
+    f = fopen(vel_str(argv[0]),"rb");
+    if (!f) { char msg[256]; snprintf(msg,sizeof(msg),"readfile: cannot open '%s': %s",vel_str(argv[0]),strerror(errno)); vel_error_set(vel,msg); return NULL; }
+    fseek(f,0,SEEK_END); sz_raw=ftell(f); fseek(f,0,SEEK_SET);
+    if (sz_raw<0){fclose(f);return NULL;} sz=(size_t)sz_raw;
+    buf=malloc(sz+1); if(!buf){fclose(f);return NULL;}
+    buf[fread(buf,1,sz,f)]='\0'; fclose(f);
+    r=vel_val_str(buf); free(buf); return r;
+}
+
+/* ============================================================
+ * file — unified file info command (Tcl-compatible)
+ *
+ *   file exists   path     -> 1 or ""
+ *   file isfile   path     -> 1 or ""
+ *   file isdir    path     -> 1 or ""
+ *   file size     path     -> size in bytes
+ *   file extension path    -> ".ext" or ""
+ *   file tail     path     -> basename
+ *   file dir      path     -> dirname
+ *   file dirname  path     -> dirname (alias)
+ *   file basename path     -> basename (alias)
+ *   file readable path     -> 1 or ""
+ *   file writable path     -> 1 or ""
+ * ========================================================= */
+static VELCB vel_val_t cmd_file(vel_t vel, size_t argc, vel_val_t *argv)
+{
+    const char *op, *path;
+    struct stat st;
+
+    if (argc < 2) { vel_error_set(vel, "file: subcommand path required"); return NULL; }
+    op   = vel_str(argv[0]);
+    path = vel_str(argv[1]);
+
+    if (!strcmp(op, "exists")) {
+        return (stat(path, &st) == 0) ? vel_val_int(1) : vel_val_int(0);
+    }
+    if (!strcmp(op, "isfile") || !strcmp(op, "isregular")) {
+        if (stat(path, &st) != 0) return vel_val_int(0);
+        return S_ISREG(st.st_mode) ? vel_val_int(1) : vel_val_int(0);
+    }
+    if (!strcmp(op, "isdir") || !strcmp(op, "isdirectory")) {
+        if (stat(path, &st) != 0) return vel_val_int(0);
+        return S_ISDIR(st.st_mode) ? vel_val_int(1) : vel_val_int(0);
+    }
+    if (!strcmp(op, "size")) {
+        if (stat(path, &st) != 0) {
+            char msg[256]; snprintf(msg, sizeof(msg), "file size: cannot stat '%s': %s", path, strerror(errno));
+            vel_error_set(vel, msg); return NULL;
+        }
+        return vel_val_int((vel_int_t)st.st_size);
+    }
+    if (!strcmp(op, "extension") || !strcmp(op, "ext")) {
+        const char *dot = strrchr(path, '.'), *slash = strrchr(path, '/');
+        if (!dot || (slash && dot < slash)) return vel_val_str("");
+        return vel_val_str(dot);
+    }
+    if (!strcmp(op, "tail") || !strcmp(op, "basename")) {
+        const char *slash = strrchr(path, '/');
+        return vel_val_str(slash ? slash + 1 : path);
+    }
+    if (!strcmp(op, "dir") || !strcmp(op, "dirname") || !strcmp(op, "directory")) {
+        const char *slash = strrchr(path, '/');
+        if (!slash) return vel_val_str(".");
+        if (slash == path) return vel_val_str("/");
+        {
+            char *tmp = malloc((size_t)(slash - path) + 1);
+            memcpy(tmp, path, (size_t)(slash - path));
+            tmp[slash - path] = '\0';
+            vel_val_t r = vel_val_str(tmp);
+            free(tmp);
+            return r;
+        }
+    }
+    if (!strcmp(op, "join")) {
+        /* file join path1 path2 ... */
+        vel_val_t r = val_make(NULL);
+        size_t i;
+        for (i = 1; i < argc; i++) {
+            const char *s = vel_str(argv[i]);
+            if (s[0] == '/') {
+                /* absolute path: restart */
+                r->len = 0; r->data[0] = '\0';
+                vel_val_cat_str(r, s);
+            } else {
+                if (r->len && r->data[r->len - 1] != '/') vel_val_cat_ch(r, '/');
+                vel_val_cat_str(r, s);
+            }
+        }
+        return r;
+    }
+#ifndef WIN32
+    if (!strcmp(op, "readable")) {
+        return (access(path, R_OK) == 0) ? vel_val_int(1) : vel_val_int(0);
+    }
+    if (!strcmp(op, "writable") || !strcmp(op, "writeable")) {
+        return (access(path, W_OK) == 0) ? vel_val_int(1) : vel_val_int(0);
+    }
+    if (!strcmp(op, "executable")) {
+        return (access(path, X_OK) == 0) ? vel_val_int(1) : vel_val_int(0);
+    }
+#endif
+    if (!strcmp(op, "mtime")) {
+        if (stat(path, &st) != 0) return NULL;
+        return vel_val_int((vel_int_t)st.st_mtime);
+    }
+    {
+        char msg[128]; snprintf(msg, sizeof(msg), "file: unknown subcommand '%s'", op);
+        vel_error_set(vel, msg); return NULL;
+    }
+}
+
+
 void register_sys_builtins(vel_t vel)
 {
     vel_register(vel, "exitcode",  cmd_exitcode);
     vel_register(vel, "envget",    cmd_envget);
     vel_register(vel, "envset",    cmd_envset);
     vel_register(vel, "glob",      cmd_glob);
-    vel_register(vel, "run",       cmd_run);       /* jalankan external, live output */
-    /* "sh" didaftarkan oleh vel_jobs.c (capture output via /bin/sh -c) */
-    vel_register(vel, "exec",      cmd_exec);      /* jalankan external, capture output */
+    vel_register(vel, "run",       cmd_run);
+    vel_register(vel, "exec",      cmd_exec);
     vel_register(vel, "pipe",      cmd_pipe);
     vel_register(vel, "redirect",  cmd_redirect);
 #ifndef WIN32
@@ -1406,6 +1544,9 @@ void register_sys_builtins(vel_t vel)
     vel_register(vel, "getwd",     cmd_getwd);
     vel_register(vel, "switch",    cmd_switch);
     vel_register(vel, "date",      cmd_date);
+    vel_register(vel, "file",      cmd_file);
+    vel_register(vel, "writefile", cmd_writefile);
+    vel_register(vel, "readfile",  cmd_readfile);
     /* NOTE: "bg" sekarang didaftarkan oleh vel_jobs.c sebagai alias spawn,
      * sehingga proses background ter-track di job table dan bisa diakses
      * via jobs/fg/wait. Dulu cmd_bg di sini fork tanpa mendaftarkan ke
